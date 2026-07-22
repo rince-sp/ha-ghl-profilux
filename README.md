@@ -33,14 +33,33 @@ ways to read those codes, and both are supported:
 
 | Interface | Transport | Use for |
 |-----------|-----------|---------|
-| `http` (default) | `GET http://<host>/communication.php?dir=enq&code=<code>` → `command=<code>&data=<value>` | ProfiLux 3 / 4 |
-| `websocket` | raw SWMBus frames over `ws://<host>/ws` | ProfiLux mini |
+| `websocket` | raw SWMBus frames over `ws://<host>/ws` | ProfiLux 4 (fw 7.x), ProfiLux mini |
+| `http` | `GET http://<host>/communication.php?dir=enq&code=<code>` → `command=<code>&data=<value>` | older ProfiLux 3 / 4 firmware that still serves `communication.php` |
+
+Pick the one your controller answers on — the bundled `scraper.py` auto-detects
+it. Recent ProfiLux 4 firmware (e.g. 7.49) drops `communication.php` (returns
+404) and only speaks WebSocket, so use `websocket` there.
 
 The GHL code map and block-offset addressing were cross-checked against
 [`cjburchell/profilux-go`](https://github.com/cjburchell/profilux-go); the
 WebSocket framing matches
 [`PascalGohl/ha-profilux-mini`](https://github.com/PascalGohl/ha-profilux-mini).
 See `custom_components/profilux/protocol.py` for the commented implementation.
+
+### ProfiLux 4 firmware notes
+
+ProfiLux 4 lays out some registers differently from the ProfiLux 3 code map, so
+the integration only relies on the registers that read reliably there:
+
+- **Sensors** are detected by whether their *value* register answers, and
+  classified by GHL type id when it's valid, otherwise by the probe's name
+  (e.g. `pH`, `Redox`, `Leitwert`). Values are scaled by fixed decimals per kind.
+- **Frame checksums (BCA/BCC) are validated**, so the occasional corrupted or
+  merged reply the controller emits under rapid polling is rejected and retried.
+- **Sockets** are read from the per-socket state register (physical sockets)
+  plus any named virtual/expansion outputs. A named output whose state isn't in
+  the standard register (e.g. an Orphek light channel or a virtual switch) is
+  listed with an unknown state for now.
 
 ## Requirements
 
