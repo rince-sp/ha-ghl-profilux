@@ -55,11 +55,15 @@ class ProfiluxDashboardStrategy {
         !/_(min|max)_float$/.test(id)
     );
     // Prefer the controllable switch entity (tap-to-toggle) over the read-only
-    // status sensor when socket control is enabled and a switch exists.
+    // status sensor when socket control is enabled and a switch exists. Match by
+    // the socket name (everything after the domain + "…profilux_"), because the
+    // switch and binary_sensor can carry different entity-id prefixes (e.g. one
+    // created before the device gained an area name).
+    const socketName = (id) => id.replace(/^.*?profilux_/, "");
     const switches = ids.filter((id) => id.startsWith("switch."));
     const sockets = socketSensors.map((bs) => {
-      const stem = bs.replace(/^binary_sensor\./, "");
-      const sw = switches.find((s) => s.replace(/^switch\./, "") === stem);
+      const name = socketName(bs);
+      const sw = switches.find((s) => socketName(s) === name);
       return sw || bs;
     });
 

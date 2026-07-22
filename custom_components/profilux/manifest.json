@@ -10,5 +10,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/rince-sp/ha-ghl-profilux/issues",
   "requirements": ["websocket-client>=1.6.0"],
-  "version": "1.7.0"
+  "version": "1.7.1"
 }

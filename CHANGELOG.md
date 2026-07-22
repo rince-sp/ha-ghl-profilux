@@ -5,6 +5,15 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-07-22
+
+### Fixed
+- **Strategy dashboard now finds socket switches** even when the switch and the
+  status binary_sensor carry different entity-id prefixes (e.g. one created
+  before the device gained an area name). Sockets are matched by name, so
+  control-enabled sockets render as tap-to-toggle tiles instead of falling back
+  to the read-only status sensor.
+
 ## [1.7.0] - 2026-07-22
 
 ### Added
@@ -152,6 +161,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[1.7.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.7.1
 [1.7.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.7.0
 [1.6.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.6.0
 [1.5.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.2
