@@ -89,6 +89,36 @@ DECIMALS_BY_TYPE: dict[int, int] = {
 }
 DEFAULT_DECIMALS = 1
 
+# Classify a probe by its user-given name when the type register is unreliable
+# (as on ProfiLux 4). Each entry: (keywords, (label, unit, device_class, decimals)).
+# Order matters — more specific keywords first.
+NAME_KEYWORDS: list[tuple[tuple[str, ...], tuple[str, str | None, str | None, int]]] = [
+    (("temperatur", "temp", "°c"), ("Temperature", "°C", "temperature", 1)),
+    (("redox", "orp"), ("Redox", "mV", None, 0)),
+    (("leitwert", "leit", "conduct", "cond", "salin", "µs", "ms/cm"),
+     ("Conductivity", "mS/cm", None, 1)),
+    (("feucht", "humid"), ("Humidity", "%", "humidity", 0)),
+    (("sauerstoff", "oxygen", " o2"), ("Oxygen", "mg/L", None, 1)),
+    (("ph",), ("pH", "pH", None, 2)),
+]
+
+
+def classify_sensor(type_id: int | None, name: str | None) -> tuple[str, str | None, str | None, int]:
+    """Return (label, unit, device_class, decimals) for a probe.
+
+    Prefers a valid GHL type id; otherwise infers from the probe's name (the
+    type register is unreliable on some firmwares); otherwise a plain fallback.
+    """
+    if type_id in SENSOR_TYPES:
+        label, unit, device_class = SENSOR_TYPES[type_id]
+        return label, unit, device_class, DECIMALS_BY_TYPE.get(type_id, DEFAULT_DECIMALS)
+    low = (name or "").lower()
+    for keywords, meta in NAME_KEYWORDS:
+        if any(k in low for k in keywords):
+            return meta
+    return (name or "Sensor", None, None, DEFAULT_DECIMALS)
+
+
 # ProfiLux product ids -> model name (unknown ids fall back to "ProfiLux (id N)").
 PRODUCT_IDS: dict[int, str] = {
     2: "ProfiLux II",
@@ -492,32 +522,30 @@ class Controller:
         return {"model": model, "sw_version": sw_version, "serial": serial}
 
     def sensors(self, count: int) -> list[dict[str, Any]]:
-        idxs = list(range(count))
-        type_code = {i: CODE_SENSOR_TYPE + _sensor_offset(i) for i in idxs}
-        types = self._t.get_many_int(list(type_code.values()), signed=False)
-
-        # A populated sensor has a non-zero type; everything else is skipped.
-        present = [i for i in idxs if types.get(type_code[i], 0)]
-
-        value_code = {i: CODE_SENSOR_VALUE + _block_offset(i, 8, 8) for i in present}
+        # The count register is unreliable on some firmwares, so scan a fixed
+        # range and treat a slot as populated when its *value* register answers.
+        idxs = list(range(MAX_SENSORS))
+        value_code = {i: CODE_SENSOR_VALUE + _block_offset(i, 8, 8) for i in idxs}
         values = self._t.get_many_int(list(value_code.values()))
+        present = [i for i in idxs if value_code[i] in values]
 
+        type_code = {i: CODE_SENSOR_TYPE + _sensor_offset(i) for i in present}
+        types = self._t.get_many_int(list(type_code.values()), signed=False)
         name_code = {i: CODE_SENSOR_NAME + _block_offset(i, 32, 1) for i in present}
         names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
 
         result: list[dict[str, Any]] = []
         for i in present:
-            type_id = types[type_code[i]]
-            decimals = DECIMALS_BY_TYPE.get(type_id, DEFAULT_DECIMALS)
-            raw = values.get(value_code[i])
-            value = None if raw is None else round(raw / (10 ** decimals), decimals)
-            label, unit, device_class = SENSOR_TYPES.get(type_id, (f"Sensor {i + 1}", None, None))
+            name = names.get(name_code[i])
+            type_id = types.get(type_code[i])
+            label, unit, device_class, decimals = classify_sensor(type_id, name)
+            value = round(values[value_code[i]] / (10 ** decimals), decimals)
             result.append(
                 {
                     "index": i,
                     "type_id": type_id,
                     "label": label,
-                    "name": names.get(name_code[i]),
+                    "name": name,
                     "value": value,
                     "decimals": decimals,
                     "unit": unit,
@@ -527,24 +555,27 @@ class Controller:
         return result
 
     def sockets(self, count: int) -> list[dict[str, Any]]:
-        idxs = list(range(count))
+        # A socket is real if its state register answers (physical sockets) or
+        # it has a name (named virtual/expansion outputs). The count register is
+        # not trustworthy, so scan the full addressable range.
+        idxs = list(range(MAX_SOCKETS))
         state_code = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in idxs}
         states = self._t.get_many_int(list(state_code.values()), signed=False)
-
-        # Only sockets that actually answered are real; empty slots never reply.
-        present = [i for i in idxs if state_code[i] in states]
-
-        name_code = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in present}
+        name_code = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in idxs}
         names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
 
-        return [
-            {
-                "index": i,
-                "name": names.get(name_code[i]),
-                "is_on": states[state_code[i]] != 0,
-            }
-            for i in present
-        ]
+        present = [i for i in idxs if state_code[i] in states or names.get(name_code[i])]
+        result: list[dict[str, Any]] = []
+        for i in present:
+            state = states.get(state_code[i])
+            result.append(
+                {
+                    "index": i,
+                    "name": names.get(name_code[i]),
+                    "is_on": None if state is None else state != 0,
+                }
+            )
+        return result
 
     def alarm(self) -> bool | None:
         raw = self._get_int(CODE_IS_ALARM, signed=False)
