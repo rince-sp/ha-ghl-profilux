@@ -62,7 +62,42 @@ def main() -> int:
         action="store_true",
         help="Dump the raw type/value/state/function of every sensor and socket slot",
     )
+    # --- experimental WRITE tester (socket control R&D) ------------------
+    parser.add_argument(
+        "--write",
+        nargs=2,
+        metavar=("CODE", "VALUE"),
+        help="DANGER: write VALUE to CODE on the controller (switches real equipment!)",
+    )
+    parser.add_argument("--bytes", type=int, default=2, help="Write width in bytes (default 2)")
+    parser.add_argument("--save", action="store_true", help="Persist the write to EEPROM (default: runtime only)")
+    parser.add_argument("--verify", type=int, default=None, help="Code to read back before/after the write")
+    parser.add_argument("--yes", action="store_true", help="Skip the write confirmation prompt")
     args = parser.parse_args()
+
+    if args.write:
+        from protocol import write_and_verify  # noqa: E402, PLC0415
+
+        code, value = int(args.write[0]), int(args.write[1])
+        print("⚠️  WRITE MODE — this changes the controller and can switch live")
+        print(f"    aquarium equipment. code={code} value={value} bytes={args.bytes} "
+              f"save={args.save} verify={args.verify or code}")
+        if not args.yes:
+            if input("    Type 'yes' to proceed: ").strip().lower() != "yes":
+                print("Aborted.")
+                return 1
+        try:
+            res = write_and_verify(
+                args.host, args.username, args.password, code, value,
+                interface=INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface,
+                nbytes=args.bytes, save=args.save, verify_code=args.verify,
+            )
+        except ProfiluxError as err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 1
+        print(f"acked={res['acked']}  verify code {res['verify_code']}: "
+              f"{res['before']} -> {res['after']}")
+        return 0
 
     interface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface
 
