@@ -105,6 +105,40 @@ Home Assistant config flow.
 > old integration and its `custom_components/profilux_mini/` folder to avoid two
 > integrations polling the same controller.
 
+## Dashboard
+
+A ready-made Lovelace dashboard ships with the integration at
+[`dashboards/aquarium.yaml`](dashboards/aquarium.yaml) — sensor **gauge** cards,
+power sockets as **outlet tiles**, and a level/alarm row.
+
+> Home Assistant does not let an integration auto-create a user dashboard, so
+> this can't install *itself* — but it's versioned here alongside the code so it
+> stays in sync. Apply it either way:
+>
+> - **Quick:** Settings → Dashboards → *Add dashboard* → *New dashboard* → take
+>   control → ⋯ → **Raw configuration editor** → paste the file contents.
+> - **YAML mode:** reference the file from `configuration.yaml`:
+>   ```yaml
+>   lovelace:
+>     dashboards:
+>       profilux-aquarium:
+>         mode: yaml
+>         title: Aquarium
+>         icon: mdi:fishbowl
+>         filename: ha-ghl-profilux/dashboards/aquarium.yaml
+>   ```
+>
+> The `entity:` IDs in the file follow one controller's socket names — adjust
+> them to your own if they differ.
+
+## Versioning
+
+Releases follow [Semantic Versioning](https://semver.org); see
+[`CHANGELOG.md`](CHANGELOG.md). The version in `manifest.json` is the source of
+truth. **For HACS to show a version number (e.g. `1.0.0`) instead of a commit
+hash, publish a GitHub Release** whose tag matches the manifest version
+(`v1.0.0`); HACS reads its versions from GitHub Releases.
+
 ## Polling
 
 The integration opens one short conversation every 60 seconds and reads all

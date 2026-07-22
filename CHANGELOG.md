@@ -24,6 +24,8 @@ Initial release.
 - Reliable transport: frame checksum (BCA/BCC) validation and batched,
   retrying reads that tolerate the controller's occasional dropped/corrupt frame.
 - HACS brand **icon** and **logo**.
+- A ready-made **Lovelace dashboard** (`dashboards/aquarium.yaml`) — sensor
+  gauges, socket outlet tiles, and a level/alarm row.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
