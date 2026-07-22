@@ -76,13 +76,19 @@ class ProfiluxDashboardStrategy {
       if (unit) card.unit = unit;
       return card;
     };
-    const socketCard = (id) => ({
-      type: "tile",
-      entity: id,
-      icon: "mdi:power-socket-de",
-      color: "amber",
-      grid_options: { columns: 4 },
-    });
+    const socketCard = (id) => {
+      const card = {
+        type: "tile",
+        entity: id,
+        icon: "mdi:power-socket-de",
+        color: "amber",
+        grid_options: { columns: 4 },
+      };
+      // Controllable sockets (switch entity) toggle on tap; read-only status
+      // sensors keep the default more-info tap.
+      if (id.startsWith("switch.")) card.tap_action = { action: "toggle" };
+      return card;
+    };
     const tile = (id, columns, extra) => ({
       type: "tile",
       entity: id,

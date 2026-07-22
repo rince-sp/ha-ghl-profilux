@@ -25,12 +25,17 @@ By default the integration is **read-only** — sockets appear as `binary_sensor
 entities (status only), so it can never accidentally switch live equipment.
 
 To control sockets, enable it explicitly: **Settings → Devices & Services →
-ProfiLux → Configure → "Enable socket control"**. That adds an on/off `switch`
-per socket. Turning a switch on/off writes the socket's **Function** to "always
-on" / "always off" on the controller — the same persistent override the GHL app
-offers (it survives reboots, unlike a Maintenance program which reverts after a
-timeout). Each socket's automatic Function is remembered so control can be handed
-back to the controller.
+ProfiLux → Configure → "Enable socket control"**. That adds, per socket:
+
+- an on/off **switch**, and
+- an **Auto / On / Off** `select`.
+
+On/off writes the socket's **Function** to "always on" / "always off" on the
+controller — the same persistent override the GHL app offers (it survives
+reboots, unlike a Maintenance program which reverts after a timeout). **Auto**
+restores the socket's original Function, handing control back to the controller
+(offered once the socket has been seen un-overridden since startup, so its
+automatic Function is known).
 
 > ⚠️ A switch **overrides the controller's automatic control** of whatever is
 > plugged in. Only enable this if you understand that forcing, say, a heater or
