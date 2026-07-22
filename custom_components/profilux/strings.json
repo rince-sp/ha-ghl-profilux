@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to ProfiLux",
+        "description": "For a ProfiLux 3/4 use the HTTP interface. For a ProfiLux mini use WebSocket.",
+        "data": {
+          "host": "Host (IP address)",
+          "username": "Username",
+          "password": "Password",
+          "interface": "Interface"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check the host, credentials and interface."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}
