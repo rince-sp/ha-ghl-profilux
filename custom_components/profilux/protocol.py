@@ -47,8 +47,15 @@ CODE_SENSOR_NAME = 18000       # + block(i, 32, 1); text
 
 CODE_SOCKET_STATE = 10100      # + block(i, 24, 1); 0 = off, else on
 CODE_SOCKET_ALL_STATE = 10126  # single read: bitmask of every socket's state
+CODE_SOCKET_ALL_CURRENT = 10127  # digital powerbar: aggregate current
 CODE_SOCKET_NAME = 18064       # + block(i, 64, 1); text
 CODE_SOCKET_FUNCTION = 756     # + block(i, 24, 1); config bitfield (0 = unused)
+
+# Level ("Niveau") control loops
+CODE_LEVEL_STATE = 10070       # + block(i, 3, 1); packed: alarm/fill/drain/water
+CODE_LEVEL_INPUT_STATE = 10074  # + block(i, 4, 1); delayed/previous/undelayed
+CODE_LEVEL_NAME = 18128        # + block(i, 64, 1); text
+CODE_GET_LEVEL_COUNT = 10503
 
 CODE_GET_SENSOR_COUNT = 10500
 CODE_GET_SWITCH_COUNT = 10501
@@ -56,6 +63,7 @@ CODE_IS_ALARM = 10090
 
 MAX_SENSORS = 16
 MAX_SOCKETS = 24
+MAX_LEVELS = 3
 MEGA_BLOCK_SIZE = 1000
 
 # type id -> (label, unit, HA device_class or None), from the GHL sensor map.
@@ -581,15 +589,45 @@ class Controller:
         raw = self._get_int(CODE_IS_ALARM, signed=False)
         return None if raw is None else raw != 0
 
+    def levels(self) -> list[dict[str, Any]]:
+        idxs = list(range(MAX_LEVELS))
+        state_code = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in idxs}
+        states = self._t.get_many_int(list(state_code.values()), signed=False)
+        name_code = {i: CODE_LEVEL_NAME + _block_offset(i, 64, 1) for i in idxs}
+        names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
+
+        present = [i for i in idxs if state_code[i] in states or names.get(name_code[i])]
+        result: list[dict[str, Any]] = []
+        for i in present:
+            raw = states.get(state_code[i])
+            alarm = fill = drain = None
+            if raw is not None:
+                # bit layout: A F D W W W W R  (alarm/fill/drain/water-mode/reserved)
+                v = raw >> 1
+                v >>= 4  # skip water-mode nibble
+                drain = bool(v & 0x1)
+                v >>= 1
+                fill = bool(v & 0x1)
+                v >>= 1
+                alarm = bool(v & 0x1)
+            result.append(
+                {
+                    "index": i,
+                    "name": names.get(name_code[i]),
+                    "alarm": alarm,
+                    "fill": fill,
+                    "drain": drain,
+                }
+            )
+        return result
+
     def snapshot(self) -> dict[str, Any]:
-        sensor_count = self._count(CODE_GET_SENSOR_COUNT, MAX_SENSORS)
-        socket_count = self._count(CODE_GET_SWITCH_COUNT, MAX_SOCKETS)
         return {
             "device": self.device_info(),
             "alarm": self.alarm(),
-            "counts": {"sensors": sensor_count, "sockets": socket_count},
-            "sensors": self.sensors(sensor_count),
-            "sockets": self.sockets(socket_count),
+            "sensors": self.sensors(0),
+            "sockets": self.sockets(0),
+            "levels": self.levels(),
         }
 
 
@@ -633,16 +671,32 @@ def diagnostic(
         k_func_c = {i: CODE_SOCKET_FUNCTION + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
         k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in range(MAX_SOCKETS)}
 
+        # Widen the socket scan to 32 and add level + "unknown code" probes so
+        # channels beyond the 16-bit state register (e.g. digital-powerbar
+        # channels 17/18) can be located.
+        wide = range(32)
+        k_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in wide}
+        k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in wide}
+        l_state_c = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in range(4)}
+        l_input_c = {i: CODE_LEVEL_INPUT_STATE + _block_offset(i, 4, 1) for i in range(4)}
+        l_name_c = {i: CODE_LEVEL_NAME + _block_offset(i, 64, 1) for i in range(4)}
+        probe_codes = list(range(10124, 10146))  # around SP_ALL_STATE/CURRENT
+
         s_types = transport.get_many_int(list(s_type_c.values()), signed=False)
         s_vals = transport.get_many_int(list(s_val_c.values()))
         s_names = transport.get_many_text(list(s_name_c.values()))
         k_states = transport.get_many_int(list(k_state_c.values()), signed=False)
-        k_funcs = transport.get_many_int(list(k_func_c.values()), signed=False)
         k_names = transport.get_many_text(list(k_name_c.values()))
+        l_states = transport.get_many_int(list(l_state_c.values()), signed=False)
+        l_inputs = transport.get_many_int(list(l_input_c.values()), signed=False)
+        l_names = transport.get_many_text(list(l_name_c.values()))
+        probes = transport.get_many_int(probe_codes, signed=False)
         all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
+        all_current = ctrl._get_int(CODE_SOCKET_ALL_CURRENT, signed=False)
         counts = {
             "sensors": ctrl._get_int(CODE_GET_SENSOR_COUNT, signed=False),
             "sockets": ctrl._get_int(CODE_GET_SWITCH_COUNT, signed=False),
+            "levels": ctrl._get_int(CODE_GET_LEVEL_COUNT, signed=False),
         }
 
     sensors = [
@@ -659,14 +713,25 @@ def diagnostic(
             "index": i,
             "state": k_states.get(k_state_c[i]),
             "all_bit": None if all_state is None else (all_state >> i) & 1,
-            "func": k_funcs.get(k_func_c[i]),
             "name": k_names.get(k_name_c[i]),
         }
-        for i in range(MAX_SOCKETS)
+        for i in wide
+    ]
+    levels = [
+        {
+            "index": i,
+            "state": l_states.get(l_state_c[i]),
+            "input": l_inputs.get(l_input_c[i]),
+            "name": l_names.get(l_name_c[i]),
+        }
+        for i in range(4)
     ]
     return {
         "counts": counts,
         "all_state_raw": all_state,
+        "all_current_raw": all_current,
+        "probe_codes": {c: v for c, v in probes.items()},
         "sensors": sensors,
         "sockets": sockets,
+        "levels": levels,
     }

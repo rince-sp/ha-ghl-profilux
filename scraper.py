@@ -73,20 +73,26 @@ def main() -> int:
             print(f"ERROR: {err}", file=sys.stderr)
             return 1
         print(f"counts (reported): {dump['counts']}")
-        print(f"SP_ALL_STATE raw : {dump['all_state_raw']!r}")
+        print(f"SP_ALL_STATE  raw: {dump['all_state_raw']!r}")
+        print(f"SP_ALL_CURRENT raw: {dump['all_current_raw']!r}")
         print("\nSENSOR slots (idx: type / raw value / name):")
         for s in dump["sensors"]:
             if s["type"] is None and s["value_raw"] is None and s["name"] is None:
                 continue
             print(f"  [{s['index']:>2}] type={s['type']!s:<5} raw={s['value_raw']!s:<8} name={s['name']!r}")
-        print("\nSOCKET slots (idx: state / all-bit / func / name):")
+        print("\nSOCKET slots (idx: state / all-bit / name):")
         for k in dump["sockets"]:
-            if k["state"] is None and k["func"] is None and k["name"] is None and not k["all_bit"]:
+            if k["state"] is None and k["name"] is None and not k["all_bit"]:
                 continue
-            print(
-                f"  [{k['index']:>2}] state={k['state']!s:<5} bit={k['all_bit']!s:<5} "
-                f"func={k['func']!s:<7} name={k['name']!r}"
-            )
+            print(f"  [{k['index']:>2}] state={k['state']!s:<5} bit={k['all_bit']!s:<5} name={k['name']!r}")
+        print("\nLEVEL slots (idx: state / input / name):")
+        for lv in dump["levels"]:
+            if lv["state"] is None and lv["input"] is None and lv["name"] is None:
+                continue
+            print(f"  [{lv['index']:>2}] state={lv['state']!s:<7} input={lv['input']!s:<7} name={lv['name']!r}")
+        print("\nUNKNOWN code probes (10124-10145):")
+        for code, val in sorted(dump["probe_codes"].items()):
+            print(f"  code {code}: {val}  (bin {val:016b})")
         return 0
 
     order = (
@@ -133,6 +139,17 @@ def main() -> int:
         name = p["name"] or f"Socket {p['index'] + 1}"
         state = "??" if p["is_on"] is None else ("ON" if p["is_on"] else "off")
         print(f"  [{p['index']}] {name:<24} {state}")
+
+    print("\nLevel control loops:")
+    if not data.get("levels"):
+        print("  (none reported)")
+    for lv in data.get("levels", []):
+        name = lv["name"] or f"Level {lv['index'] + 1}"
+        flags = ", ".join(
+            f"{k}={v}" for k, v in (("alarm", lv["alarm"]), ("fill", lv["fill"]), ("drain", lv["drain"]))
+            if v is not None
+        )
+        print(f"  [{lv['index']}] {name:<24} {flags or '(no state)'}")
 
     return 0
 
