@@ -32,9 +32,9 @@ from protocol import (  # noqa: E402
 )
 
 
-def _try(host: str, user: str, password: str, interface: str):
+def _try(host: str, user: str, password: str, interface: str, read_names: bool):
     try:
-        return fetch_all(host, user, password, interface), None
+        return fetch_all(host, user, password, interface, read_names=read_names), None
     except ProfiluxError as err:
         return None, str(err)
 
@@ -51,6 +51,11 @@ def main() -> int:
         help="Local interface to use (default: auto-detect)",
     )
     parser.add_argument("--json", action="store_true", help="Print raw JSON instead of a summary")
+    parser.add_argument(
+        "--no-names",
+        action="store_true",
+        help="Skip reading sensor/socket names (diagnostic: isolates name reads)",
+    )
     args = parser.parse_args()
 
     order = (
@@ -59,7 +64,9 @@ def main() -> int:
 
     data = used = None
     for interface in order:
-        data, err = _try(args.host, args.username, args.password, interface)
+        data, err = _try(
+            args.host, args.username, args.password, interface, read_names=not args.no_names
+        )
         if data is not None and (data["sensors"] or data["sockets"]):
             used = interface
             break
@@ -77,6 +84,8 @@ def main() -> int:
     device = data["device"]
     print(f"Device   : {device['model']}  (fw {device['sw_version']}, serial {device['serial']})")
     print(f"Alarm    : {data['alarm']}")
+    counts = data.get("counts", {})
+    print(f"Reported : {counts.get('sensors')} sensor slots, {counts.get('sockets')} socket slots")
 
     print("\nSensors:")
     if not data["sensors"]:
@@ -91,7 +100,8 @@ def main() -> int:
         print("  (none reported)")
     for p in data["sockets"]:
         name = p["name"] or f"Socket {p['index'] + 1}"
-        print(f"  [{p['index']}] {name:<24} {'ON' if p['is_on'] else 'off'}")
+        state = "??" if p["is_on"] is None else ("ON" if p["is_on"] else "off")
+        print(f"  [{p['index']}] {name:<24} {state}")
 
     return 0
 

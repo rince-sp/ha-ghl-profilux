@@ -70,7 +70,24 @@ SENSOR_TYPES: dict[int, tuple[str, str | None, str | None]] = {
     10: ("Voltage", "V", "voltage"),
 }
 
-# ProfiLux product ids -> model name (older models; newer ones fall back).
+# Decimal places by sensor type. ProfiLux values are fixed-point integers whose
+# scale is defined by the *type*, not a per-sensor display register (that
+# register proved unreliable across firmwares). raw / 10**decimals -> value.
+DECIMALS_BY_TYPE: dict[int, int] = {
+    1: 1,   # Temperature   251 -> 25.1 °C
+    2: 2,   # pH            812 -> 8.12
+    3: 0,   # Redox         109 -> 109 mV
+    4: 1,   # Conductivity (µS/cm)
+    5: 1,   # Conductivity  376 -> 37.6 mS/cm
+    6: 1,
+    7: 0,   # Humidity
+    8: 1,   # Air Temperature
+    9: 1,   # Oxygen
+    10: 2,  # Voltage
+}
+DEFAULT_DECIMALS = 1
+
+# ProfiLux product ids -> model name (unknown ids fall back to "ProfiLux (id N)").
 PRODUCT_IDS: dict[int, str] = {
     2: "ProfiLux II",
     3: "ProfiLux Plus II",
@@ -81,6 +98,7 @@ PRODUCT_IDS: dict[int, str] = {
     8: "ProfiLux II Outdoor",
     11: "ProfiLux III",
     12: "ProfiLux III Ex",
+    23: "ProfiLux 4",
 }
 
 
@@ -265,7 +283,7 @@ class WebSocketTransport(Transport):
         username: str,
         password: str,
         timeout: int = 10,
-        read_timeout: float = 4.0,
+        read_timeout: float = 3.0,
     ) -> None:
         self._url = f"ws://{host}/ws"
         token = base64.b64encode(f"{username}:{password}".encode()).decode()
@@ -301,7 +319,7 @@ class WebSocketTransport(Transport):
             self._ws.send_binary(_make_enquiry(code))
         except Exception as err:  # noqa: BLE001
             raise ProfiluxError(f"send failed for code {code}: {err}") from err
-        for _ in range(4):
+        for _ in range(6):
             try:
                 reply = self._ws.recv()
             except Exception as err:  # noqa: BLE001
@@ -341,21 +359,45 @@ def make_transport(interface: str, host: str, username: str, password: str) -> T
 
 
 class Controller:
-    """Reads device info, all sensors, and all sockets via a transport."""
+    """Reads device info, all sensors, and all sockets via a transport.
 
-    def __init__(self, transport: Transport) -> None:
+    The controller occasionally drops a reply under back-to-back requests, so
+    every read is retried a few times, and slot scans never abort early on a
+    miss — they cover the full reported count and simply skip anything that
+    stays silent.
+    """
+
+    def __init__(self, transport: Transport, retries: int = 3, read_names: bool = True) -> None:
         self._t = transport
+        self._retries = max(1, retries)
+        self._read_names = read_names
+
+    def _get_int(self, code: int, signed: bool = True) -> int | None:
+        for _ in range(self._retries):
+            value = self._t.get_int(code, signed=signed)
+            if value is not None:
+                return value
+        return None
+
+    def _get_text(self, code: int) -> str | None:
+        if not self._read_names:
+            return None
+        for _ in range(self._retries):
+            text = self._t.get_text(code)
+            if text is not None:
+                return text
+        return None
 
     def _count(self, code: int, cap: int) -> int:
-        count = self._t.get_int(code, signed=False)
+        count = self._get_int(code, signed=False)
         if count is None or count <= 0:
             return 0
         return min(count, cap)
 
     def device_info(self) -> dict[str, Any]:
-        version_raw = self._t.get_int(CODE_SOFTWAREVERSION, signed=False)
-        product_id = self._t.get_int(CODE_PRODUCTID, signed=False)
-        serial = self._t.get_int(CODE_SERIALNUMBER, signed=False)
+        version_raw = self._get_int(CODE_SOFTWAREVERSION, signed=False)
+        product_id = self._get_int(CODE_PRODUCTID, signed=False)
+        serial = self._get_int(CODE_SERIALNUMBER, signed=False)
         sw_version = None if version_raw is None else f"{version_raw / 100:.2f}"
         if product_id is None:
             model = "ProfiLux"
@@ -363,23 +405,19 @@ class Controller:
             model = PRODUCT_IDS.get(product_id, f"ProfiLux (id {product_id})")
         return {"model": model, "sw_version": sw_version, "serial": serial}
 
-    def sensors(self) -> list[dict[str, Any]]:
+    def sensors(self, count: int) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
-        for i in range(self._count(CODE_GET_SENSOR_COUNT, MAX_SENSORS)):
+        for i in range(count):
             offset = _sensor_offset(i)
-            type_id = self._t.get_int(CODE_SENSOR_TYPE + offset, signed=False)
-            if type_id is None:  # no reply — past the controller's real slots
-                break
-            if type_id == 0:  # empty slot
+            type_id = self._get_int(CODE_SENSOR_TYPE + offset, signed=False)
+            if not type_id:  # None (silent) or 0 (empty slot) — skip, keep scanning
                 continue
 
-            decimals_raw = self._t.get_int(CODE_SENSOR_DISPLAYMODE + offset, signed=False)
-            decimals = (decimals_raw & 0x0F) if decimals_raw is not None else 1
-
-            raw = self._t.get_int(CODE_SENSOR_VALUE + _block_offset(i, 8, 8))
+            decimals = DECIMALS_BY_TYPE.get(type_id, DEFAULT_DECIMALS)
+            raw = self._get_int(CODE_SENSOR_VALUE + _block_offset(i, 8, 8))
             value = None if raw is None else round(raw / (10 ** decimals), decimals)
 
-            name = self._t.get_text(CODE_SENSOR_NAME + _block_offset(i, 32, 1))
+            name = self._get_text(CODE_SENSOR_NAME + _block_offset(i, 32, 1))
             label, unit, device_class = SENSOR_TYPES.get(type_id, (f"Sensor {i + 1}", None, None))
             result.append(
                 {
@@ -395,40 +433,53 @@ class Controller:
             )
         return result
 
-    def sockets(self) -> list[dict[str, Any]]:
+    def sockets(self, count: int) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
-        for i in range(self._count(CODE_GET_SWITCH_COUNT, MAX_SOCKETS)):
-            state = self._t.get_int(CODE_SOCKET_STATE + _block_offset(i, 24, 1), signed=False)
-            if state is None:  # no reply — past the controller's real sockets
-                break
-            name = self._t.get_text(CODE_SOCKET_NAME + _block_offset(i, 64, 1))
-            result.append({"index": i, "name": name, "is_on": state != 0})
+        for i in range(count):
+            state = self._get_int(CODE_SOCKET_STATE + _block_offset(i, 24, 1), signed=False)
+            name = self._get_text(CODE_SOCKET_NAME + _block_offset(i, 64, 1))
+            result.append(
+                {
+                    "index": i,
+                    "name": name,
+                    "is_on": None if state is None else state != 0,
+                }
+            )
         return result
 
     def alarm(self) -> bool | None:
-        raw = self._t.get_int(CODE_IS_ALARM, signed=False)
+        raw = self._get_int(CODE_IS_ALARM, signed=False)
         return None if raw is None else raw != 0
 
     def snapshot(self) -> dict[str, Any]:
+        sensor_count = self._count(CODE_GET_SENSOR_COUNT, MAX_SENSORS)
+        socket_count = self._count(CODE_GET_SWITCH_COUNT, MAX_SOCKETS)
         return {
             "device": self.device_info(),
             "alarm": self.alarm(),
-            "sensors": self.sensors(),
-            "sockets": self.sockets(),
+            "counts": {"sensors": sensor_count, "sockets": socket_count},
+            "sensors": self.sensors(sensor_count),
+            "sockets": self.sockets(socket_count),
         }
 
 
-def fetch_all(host: str, username: str, password: str, interface: str = INTERFACE_HTTP) -> dict[str, Any]:
+def fetch_all(
+    host: str,
+    username: str,
+    password: str,
+    interface: str = INTERFACE_HTTP,
+    read_names: bool = True,
+) -> dict[str, Any]:
     """Read device info, every populated sensor, and every socket.
 
     Raises :class:`ProfiluxError` on connection/auth failure.
     """
     with make_transport(interface, host, username, password) as transport:
-        return Controller(transport).snapshot()
+        return Controller(transport, read_names=read_names).snapshot()
 
 
 def test_connection(host: str, username: str, password: str, interface: str = INTERFACE_HTTP) -> None:
     """Lightweight reachability/auth check for the config flow."""
     with make_transport(interface, host, username, password) as transport:
-        if transport.get_int(CODE_GET_SENSOR_COUNT, signed=False) is None:
+        if Controller(transport)._get_int(CODE_GET_SENSOR_COUNT, signed=False) is None:
             raise ProfiluxError("connected but received no valid response")
