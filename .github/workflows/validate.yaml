@@ -11,18 +11,24 @@ on:
 jobs:
   hassfest:
     # Validates that the integration is structurally correct for Home Assistant
-    # (manifest, strings, translations). This is the meaningful check for a
-    # custom-repo / manually-installed integration.
+    # (manifest, strings, translations).
     name: Hassfest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
 
-  # NOTE: The HACS validation action (hacs/action) is a *default-store publishing*
-  # linter. It requires a PUBLIC repository (it fetches hacs.json / manifest.json
-  # through the GitHub API), plus brand assets in the home-assistant/brands repo
-  # and GitHub repo topics — none of which are needed to install this integration
-  # manually or as a HACS custom repository. It is intentionally omitted here.
-  # To publish to the HACS default store later, make the repo public and add a
-  # job:  uses: hacs/action@main  with: { category: integration }
+  hacs:
+    # Validates the repo is installable via HACS. `brands` and `topics` are
+    # default-store publishing requirements (brand assets in home-assistant/brands
+    # and GitHub repo topics), not needed for a custom-repository install, so they
+    # are ignored. Requires a public repository — HACS reads hacs.json /
+    # manifest.json through the GitHub API.
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands topics
