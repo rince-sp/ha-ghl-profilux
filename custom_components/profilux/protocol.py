@@ -46,7 +46,9 @@ CODE_SENSOR_VALUE = 10000      # + block(i, 8, 8); raw integer, needs scaling
 CODE_SENSOR_NAME = 18000       # + block(i, 32, 1); text
 
 CODE_SOCKET_STATE = 10100      # + block(i, 24, 1); 0 = off, else on
+CODE_SOCKET_ALL_STATE = 10126  # single read: bitmask of every socket's state
 CODE_SOCKET_NAME = 18064       # + block(i, 64, 1); text
+CODE_SOCKET_FUNCTION = 756     # + block(i, 24, 1); config bitfield (0 = unused)
 
 CODE_GET_SENSOR_COUNT = 10500
 CODE_GET_SWITCH_COUNT = 10501
@@ -121,7 +123,12 @@ def _sensor_offset(index: int) -> int:
 
 
 class Transport:
-    """Reads a single code as an int or as text."""
+    """Reads controller codes as ints or text.
+
+    ``get_many_*`` read a batch of codes and return only those that answered
+    (missing codes are simply absent). The default implementation loops the
+    single-code reads; transports that can pipeline override it.
+    """
 
     def __enter__(self) -> "Transport":
         return self
@@ -134,6 +141,22 @@ class Transport:
 
     def get_text(self, code: int) -> str | None:
         raise NotImplementedError
+
+    def get_many_int(self, codes: list[int], signed: bool = True) -> dict[int, int]:
+        out: dict[int, int] = {}
+        for code in codes:
+            value = self.get_int(code, signed=signed)
+            if value is not None:
+                out[code] = value
+        return out
+
+    def get_many_text(self, codes: list[int]) -> dict[int, str]:
+        out: dict[int, str] = {}
+        for code in codes:
+            text = self.get_text(code)
+            if text is not None:
+                out[code] = text
+        return out
 
 
 class HttpTransport(Transport):
@@ -346,6 +369,59 @@ class WebSocketTransport(Transport):
             return None
         return _nibbles_to_text(nibbles) or None
 
+    # -- Batched reads ----------------------------------------------------
+    # The controller drops the odd reply under back-to-back requests and never
+    # answers for empty slots. Firing one enquiry at a time (with a per-code
+    # timeout) is therefore both slow and lossy. Instead, send a whole batch,
+    # drain whatever comes back mapping by code, then retry only the codes that
+    # stayed silent for a couple of rounds.
+
+    def _read_many_raw(
+        self, codes: list[int], rounds: int = 3, drain_timeout: float = 0.7
+    ) -> dict[int, list[int]]:
+        results: dict[int, list[int]] = {}
+        unique = list(dict.fromkeys(codes))
+        for _ in range(rounds):
+            pending = [c for c in unique if c not in results]
+            if not pending:
+                break
+            for code in pending:
+                try:
+                    self._ws.send_binary(_make_enquiry(code))
+                except Exception as err:  # noqa: BLE001
+                    raise ProfiluxError(f"send failed for code {code}: {err}") from err
+            self._drain(set(pending), results, drain_timeout)
+        return results
+
+    def _drain(
+        self, expected: set[int], results: dict[int, list[int]], drain_timeout: float
+    ) -> None:
+        """Read replies until the controller goes quiet for ``drain_timeout``."""
+        self._ws.settimeout(drain_timeout)
+        try:
+            while True:
+                try:
+                    reply = self._ws.recv()
+                except Exception as err:  # noqa: BLE001
+                    if _is_timeout(err):
+                        return  # no more replies this round
+                    raise ProfiluxError(f"recv failed: {err}") from err
+                if isinstance(reply, str):
+                    reply = reply.encode("latin-1", "ignore")
+                parsed = _parse_response(reply)
+                if parsed and parsed[0] in expected and parsed[0] not in results:
+                    results[parsed[0]] = parsed[1]
+        finally:
+            self._ws.settimeout(self._read_timeout)
+
+    def get_many_int(self, codes: list[int], signed: bool = True) -> dict[int, int]:
+        raw = self._read_many_raw(codes)
+        return {code: _nibbles_to_int(nib, signed=signed) for code, nib in raw.items()}
+
+    def get_many_text(self, codes: list[int]) -> dict[int, str]:
+        raw = self._read_many_raw(codes)
+        return {code: text for code, nib in raw.items() if (text := _nibbles_to_text(nib))}
+
 
 def make_transport(interface: str, host: str, username: str, password: str) -> Transport:
     if interface == INTERFACE_WEBSOCKET:
@@ -406,25 +482,32 @@ class Controller:
         return {"model": model, "sw_version": sw_version, "serial": serial}
 
     def sensors(self, count: int) -> list[dict[str, Any]]:
+        idxs = list(range(count))
+        type_code = {i: CODE_SENSOR_TYPE + _sensor_offset(i) for i in idxs}
+        types = self._t.get_many_int(list(type_code.values()), signed=False)
+
+        # A populated sensor has a non-zero type; everything else is skipped.
+        present = [i for i in idxs if types.get(type_code[i], 0)]
+
+        value_code = {i: CODE_SENSOR_VALUE + _block_offset(i, 8, 8) for i in present}
+        values = self._t.get_many_int(list(value_code.values()))
+
+        name_code = {i: CODE_SENSOR_NAME + _block_offset(i, 32, 1) for i in present}
+        names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
+
         result: list[dict[str, Any]] = []
-        for i in range(count):
-            offset = _sensor_offset(i)
-            type_id = self._get_int(CODE_SENSOR_TYPE + offset, signed=False)
-            if not type_id:  # None (silent) or 0 (empty slot) — skip, keep scanning
-                continue
-
+        for i in present:
+            type_id = types[type_code[i]]
             decimals = DECIMALS_BY_TYPE.get(type_id, DEFAULT_DECIMALS)
-            raw = self._get_int(CODE_SENSOR_VALUE + _block_offset(i, 8, 8))
+            raw = values.get(value_code[i])
             value = None if raw is None else round(raw / (10 ** decimals), decimals)
-
-            name = self._get_text(CODE_SENSOR_NAME + _block_offset(i, 32, 1))
             label, unit, device_class = SENSOR_TYPES.get(type_id, (f"Sensor {i + 1}", None, None))
             result.append(
                 {
                     "index": i,
                     "type_id": type_id,
                     "label": label,
-                    "name": name,
+                    "name": names.get(name_code[i]),
                     "value": value,
                     "decimals": decimals,
                     "unit": unit,
@@ -434,18 +517,24 @@ class Controller:
         return result
 
     def sockets(self, count: int) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        for i in range(count):
-            state = self._get_int(CODE_SOCKET_STATE + _block_offset(i, 24, 1), signed=False)
-            name = self._get_text(CODE_SOCKET_NAME + _block_offset(i, 64, 1))
-            result.append(
-                {
-                    "index": i,
-                    "name": name,
-                    "is_on": None if state is None else state != 0,
-                }
-            )
-        return result
+        idxs = list(range(count))
+        state_code = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in idxs}
+        states = self._t.get_many_int(list(state_code.values()), signed=False)
+
+        # Only sockets that actually answered are real; empty slots never reply.
+        present = [i for i in idxs if state_code[i] in states]
+
+        name_code = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in present}
+        names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
+
+        return [
+            {
+                "index": i,
+                "name": names.get(name_code[i]),
+                "is_on": states[state_code[i]] != 0,
+            }
+            for i in present
+        ]
 
     def alarm(self) -> bool | None:
         raw = self._get_int(CODE_IS_ALARM, signed=False)
@@ -483,3 +572,60 @@ def test_connection(host: str, username: str, password: str, interface: str = IN
     with make_transport(interface, host, username, password) as transport:
         if Controller(transport)._get_int(CODE_GET_SENSOR_COUNT, signed=False) is None:
             raise ProfiluxError("connected but received no valid response")
+
+
+def diagnostic(
+    host: str, username: str, password: str, interface: str = INTERFACE_HTTP
+) -> dict[str, Any]:
+    """Raw dump of every sensor/socket slot — for reverse-engineering a device.
+
+    Reads the type/value/name of every sensor slot and the per-socket state,
+    the bulk ``SP_ALL_STATE`` bitmask, socket function and name, so the real
+    layout (which type id sits where, how to read all sockets) is visible.
+    """
+    with make_transport(interface, host, username, password) as transport:
+        ctrl = Controller(transport)
+        s_type_c = {i: CODE_SENSOR_TYPE + _sensor_offset(i) for i in range(MAX_SENSORS)}
+        s_val_c = {i: CODE_SENSOR_VALUE + _block_offset(i, 8, 8) for i in range(MAX_SENSORS)}
+        s_name_c = {i: CODE_SENSOR_NAME + _block_offset(i, 32, 1) for i in range(MAX_SENSORS)}
+        k_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
+        k_func_c = {i: CODE_SOCKET_FUNCTION + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
+        k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in range(MAX_SOCKETS)}
+
+        s_types = transport.get_many_int(list(s_type_c.values()), signed=False)
+        s_vals = transport.get_many_int(list(s_val_c.values()))
+        s_names = transport.get_many_text(list(s_name_c.values()))
+        k_states = transport.get_many_int(list(k_state_c.values()), signed=False)
+        k_funcs = transport.get_many_int(list(k_func_c.values()), signed=False)
+        k_names = transport.get_many_text(list(k_name_c.values()))
+        all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
+        counts = {
+            "sensors": ctrl._get_int(CODE_GET_SENSOR_COUNT, signed=False),
+            "sockets": ctrl._get_int(CODE_GET_SWITCH_COUNT, signed=False),
+        }
+
+    sensors = [
+        {
+            "index": i,
+            "type": s_types.get(s_type_c[i]),
+            "value_raw": s_vals.get(s_val_c[i]),
+            "name": s_names.get(s_name_c[i]),
+        }
+        for i in range(MAX_SENSORS)
+    ]
+    sockets = [
+        {
+            "index": i,
+            "state": k_states.get(k_state_c[i]),
+            "all_bit": None if all_state is None else (all_state >> i) & 1,
+            "func": k_funcs.get(k_func_c[i]),
+            "name": k_names.get(k_name_c[i]),
+        }
+        for i in range(MAX_SOCKETS)
+    ]
+    return {
+        "counts": counts,
+        "all_state_raw": all_state,
+        "sensors": sensors,
+        "sockets": sockets,
+    }

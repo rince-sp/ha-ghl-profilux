@@ -28,6 +28,7 @@ from protocol import (  # noqa: E402
     INTERFACE_HTTP,
     INTERFACE_WEBSOCKET,
     ProfiluxError,
+    diagnostic,
     fetch_all,
 )
 
@@ -56,7 +57,37 @@ def main() -> int:
         action="store_true",
         help="Skip reading sensor/socket names (diagnostic: isolates name reads)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Dump the raw type/value/state/function of every sensor and socket slot",
+    )
     args = parser.parse_args()
+
+    interface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface
+
+    if args.debug:
+        try:
+            dump = diagnostic(args.host, args.username, args.password, interface)
+        except ProfiluxError as err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 1
+        print(f"counts (reported): {dump['counts']}")
+        print(f"SP_ALL_STATE raw : {dump['all_state_raw']!r}")
+        print("\nSENSOR slots (idx: type / raw value / name):")
+        for s in dump["sensors"]:
+            if s["type"] is None and s["value_raw"] is None and s["name"] is None:
+                continue
+            print(f"  [{s['index']:>2}] type={s['type']!s:<5} raw={s['value_raw']!s:<8} name={s['name']!r}")
+        print("\nSOCKET slots (idx: state / all-bit / func / name):")
+        for k in dump["sockets"]:
+            if k["state"] is None and k["func"] is None and k["name"] is None and not k["all_bit"]:
+                continue
+            print(
+                f"  [{k['index']:>2}] state={k['state']!s:<5} bit={k['all_bit']!s:<5} "
+                f"func={k['func']!s:<7} name={k['name']!r}"
+            )
+        return 0
 
     order = (
         [INTERFACE_HTTP, INTERFACE_WEBSOCKET] if args.interface == "auto" else [args.interface]
@@ -93,7 +124,7 @@ def main() -> int:
     for s in data["sensors"]:
         name = s["name"] or s["label"]
         unit = f" {s['unit']}" if s["unit"] else ""
-        print(f"  [{s['index']}] {name:<24} {s['value']}{unit}")
+        print(f"  [{s['index']}] {name:<24} {s['value']}{unit:<8}  (type {s['type_id']})")
 
     print("\nPower sockets:")
     if not data["sockets"]:
