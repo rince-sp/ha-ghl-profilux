@@ -333,7 +333,8 @@ def _nibbles_to_text(nibbles: list[int]) -> str:
         byte = nibbles[i] | (nibbles[i + 1] << 4)
         if byte == 0:
             break
-        if 32 <= byte < 127:
+        # Latin-1 so German umlauts (ü/ö/ä/ß) in probe/socket names survive.
+        if byte >= 32 and byte != 127:
             chars.append(chr(byte))
     return "".join(chars).strip()
 
@@ -671,10 +672,10 @@ def diagnostic(
         k_func_c = {i: CODE_SOCKET_FUNCTION + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
         k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in range(MAX_SOCKETS)}
 
-        # Widen the socket scan to 32 and add level + "unknown code" probes so
-        # channels beyond the 16-bit state register (e.g. digital-powerbar
-        # channels 17/18) can be located.
-        wide = range(32)
+        # Scan the real socket range (indices >= 24 wrap into other code blocks)
+        # and add level + "unknown code" probes so channels beyond the 16-bit
+        # state register can be located.
+        wide = range(MAX_SOCKETS)
         k_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in wide}
         k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in wide}
         l_state_c = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in range(4)}

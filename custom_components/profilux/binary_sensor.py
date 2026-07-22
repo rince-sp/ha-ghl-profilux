@@ -32,6 +32,9 @@ async def async_setup_entry(
     entities: list[BinarySensorEntity] = [
         ProfiluxSocket(coordinator, socket["index"]) for socket in data.get("sockets", [])
     ]
+    entities += [
+        ProfiluxLevelAlarm(coordinator, level["index"]) for level in data.get("levels", [])
+    ]
     if data.get("alarm") is not None:
         entities.append(ProfiluxAlarm(coordinator))
 
@@ -65,6 +68,42 @@ class ProfiluxSocket(ProfiluxEntity, BinarySensorEntity):
     @property
     def available(self) -> bool:
         return super().available and self._socket_data is not None
+
+
+class ProfiluxLevelAlarm(ProfiluxEntity, BinarySensorEntity):
+    """Alarm state of one level ("Niveau") control loop, with fill/drain attrs."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:water-alert"
+
+    def __init__(self, coordinator: ProfiluxCoordinator, index: int) -> None:
+        super().__init__(coordinator)
+        self._index = index
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_level_{index}_alarm"
+        data = self._level_data or {}
+        name = data.get("name") or f"Level {index + 1}"
+        self._attr_name = f"{name} alarm"
+
+    @property
+    def _level_data(self) -> dict[str, Any] | None:
+        for level in (self.coordinator.data or {}).get("levels", []):
+            if level["index"] == self._index:
+                return level
+        return None
+
+    @property
+    def is_on(self) -> bool | None:
+        data = self._level_data
+        return None if data is None else data.get("alarm")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._level_data or {}
+        return {"fill_active": data.get("fill"), "drain_active": data.get("drain")}
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._level_data is not None
 
 
 class ProfiluxAlarm(ProfiluxEntity, BinarySensorEntity):
