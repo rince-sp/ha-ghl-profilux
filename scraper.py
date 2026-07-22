@@ -171,6 +171,17 @@ def main() -> int:
         )
         print(f"  [{lv['index']}] {name:<24} {flags or '(no state)'}")
 
+    print("\nDosing pumps:")
+    if not data.get("dosing_pumps"):
+        print("  (none reported)")
+    for pu in data.get("dosing_pumps", []):
+        name = pu["name"] or f"Dosing pump {pu['index'] + 1}"
+        fill = "?" if pu["fill_ml"] is None else f"{pu['fill_ml']} mL"
+        cap = "" if not pu["capacity_ml"] else f" / {pu['capacity_ml']} mL"
+        pct = "" if pu["percent"] is None else f"  ({pu['percent']}%)"
+        mode = f"  [{pu['mode']}]" if pu.get("mode") else ""
+        print(f"  [{pu['index']}] {name:<24} {fill}{cap}{pct}{mode}")
+
     return 0
 
 

@@ -5,6 +5,16 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-07-22
+
+### Added
+- **Dosing pumps ("Dosierpumpen").** A fill-level sensor per dosing pump showing
+  the **remaining reservoir volume** in mL, with the configured **capacity** and
+  a **percent** full as attributes. Only pumps actually in use are exposed — the
+  schedule mode ("Modus" on the Dosierplan tab) must not be "Aus" — and the mode
+  is surfaced as an attribute. The auto-generating dashboard gains a
+  **Dosierpumpen** section.
+
 ## [1.3.0] - 2026-07-22
 
 ### Fixed
@@ -78,6 +88,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[1.4.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.4.0
 [1.3.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.3.0
 [1.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.2.0
 [1.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.1.0

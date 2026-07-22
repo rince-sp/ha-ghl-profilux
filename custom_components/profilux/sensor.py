@@ -9,7 +9,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricCurrent, UnitOfPower
+from homeassistant.const import UnitOfElectricCurrent, UnitOfPower, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -65,6 +65,11 @@ async def async_setup_entry(
     entities += [
         ProfiluxLevelStatus(coordinator, level["index"])
         for level in (coordinator.data or {}).get("levels", [])
+    ]
+    # Remaining reservoir volume per configured dosing pump.
+    entities += [
+        ProfiluxDosingPump(coordinator, pump["index"])
+        for pump in (coordinator.data or {}).get("dosing_pumps", [])
     ]
     async_add_entities(entities)
 
@@ -177,6 +182,48 @@ class ProfiluxTotalPower(ProfiluxEntity, SensorEntity):
     def native_value(self) -> float | None:
         currents = _socket_currents(self.coordinator)
         return round(sum(currents) * MAINS_VOLTAGE) if currents else None
+
+
+class ProfiluxDosingPump(ProfiluxEntity, SensorEntity):
+    """Remaining reservoir volume of one dosing pump ("Dosierpumpe"), in mL."""
+
+    _attr_device_class = SensorDeviceClass.VOLUME_STORAGE
+    _attr_native_unit_of_measurement = UnitOfVolume.MILLILITERS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:cup-water"
+
+    def __init__(self, coordinator: ProfiluxCoordinator, index: int) -> None:
+        super().__init__(coordinator)
+        self._index = index
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_dosing_{index}_fill"
+        data = self._pump_data or {}
+        name = data.get("name") or f"Dosing pump {index + 1}"
+        self._attr_name = f"{name} fill level"
+
+    @property
+    def _pump_data(self) -> dict[str, Any] | None:
+        for pump in (self.coordinator.data or {}).get("dosing_pumps", []):
+            if pump["index"] == self._index:
+                return pump
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        data = self._pump_data
+        return None if data is None else data.get("fill_ml")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._pump_data or {}
+        return {
+            "capacity_ml": data.get("capacity_ml"),
+            "percent": data.get("percent"),
+            "mode": data.get("mode"),
+        }
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._pump_data is not None
 
 
 class ProfiluxLevelStatus(ProfiluxEntity, SensorEntity):

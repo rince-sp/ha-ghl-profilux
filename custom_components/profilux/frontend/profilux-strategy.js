@@ -33,8 +33,9 @@ class ProfiluxDashboardStrategy {
 
     const isSensor = (id) => id.startsWith("sensor.");
     const gauges = ids.filter(
-      (id) => isSensor(id) && !/_(current|power|status)$/.test(id)
+      (id) => isSensor(id) && !/_(current|power|status)$/.test(id) && !/_fill_level$/.test(id)
     );
+    const dosing = ids.filter((id) => isSensor(id) && /_fill_level$/.test(id));
     // Power/current: totals first, then per-socket currents.
     const power = ids
       .filter((id) => isSensor(id) && /_(current|power)$/.test(id))
@@ -89,6 +90,19 @@ class ProfiluxDashboardStrategy {
       }
       cards.push(...power.map((id) => tile(id, id.includes("total") ? 6 : 4)));
       sections.push({ type: "grid", cards });
+    }
+    if (dosing.length) {
+      sections.push({
+        type: "grid",
+        cards: [
+          heading("Dosierpumpen", "mdi:cup-water"),
+          ...dosing.map((id) => ({
+            type: "tile",
+            entity: id,
+            grid_options: { columns: 6 },
+          })),
+        ],
+      });
     }
     if (status.length || alarms.length) {
       sections.push({

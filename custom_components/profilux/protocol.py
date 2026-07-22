@@ -58,6 +58,16 @@ CODE_LEVEL_SOURCES = 928       # + block(i, 3, 3); source1 = &0xf, source2 = (>>
 CODE_LEVEL_NAME = 18128        # + block(i, 64, 1); text
 CODE_GET_LEVEL_COUNT = 10503
 
+# Dosing pumps ("Dosierpumpen"). Four pumps per mega-block group.
+CODE_DOSING_PROPS = 480         # + block(i, 4, 26); low 2 bits = schedule mode
+CODE_DOSING_FILLLEVEL = 10311   # + block(i, 4, 6); remaining reservoir volume, mL
+CODE_DOSING_CAPACITY = 501      # + block(i, 4, 26); configured reservoir size, mL
+CODE_DOSING_NAME = 18184        # + i; text (descriptions block, flat)
+MAX_DOSING = 16
+
+# Dosing schedule mode ("Modus" on the Dosierplan tab); 0 = off ("Aus").
+DOSING_MODES = {0: "Aus", 1: "Dauerlauf", 2: "Automatische Zeiten", 3: "Individuelle Zeiten"}
+
 # Digital inputs (float switches feed the level loops)
 CODE_DIGITAL_INPUTS_STATE = 10091  # bitmask of all digital input states
 CODE_GET_DIGITAL_INPUT_COUNT = 10505
@@ -649,6 +659,52 @@ class Controller:
             )
         return result
 
+    def dosing_pumps(self) -> list[dict[str, Any]]:
+        # Reservoir fill level per dosing pump. Four pumps per mega-block group:
+        # props at 480 + block(i, 4, 26), fill at 10311 + block(i, 4, 6),
+        # capacity at 501 + block(i, 4, 26), and the name in the flat
+        # descriptions block. A pump counts as *in use* when its schedule mode
+        # (the "Modus" on the Dosierplan tab = the low 2 bits of PROPS) is not
+        # "Aus"; unused pumps are skipped even if a stale reservoir volume
+        # lingers. If the mode read is dropped, fall back to name/content so a
+        # real pump is never hidden.
+        idxs = list(range(MAX_DOSING))
+        props_code = {i: CODE_DOSING_PROPS + _block_offset(i, 4, 26) for i in idxs}
+        fill_code = {i: CODE_DOSING_FILLLEVEL + _block_offset(i, 4, 6) for i in idxs}
+        cap_code = {i: CODE_DOSING_CAPACITY + _block_offset(i, 4, 26) for i in idxs}
+        name_code = {i: CODE_DOSING_NAME + i for i in idxs}
+        props = self._t.get_many_int(list(props_code.values()), signed=False)
+        fills = self._t.get_many_int(list(fill_code.values()), signed=False)
+        caps = self._t.get_many_int(list(cap_code.values()), signed=False)
+        names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
+
+        result: list[dict[str, Any]] = []
+        for i in idxs:
+            name = names.get(name_code[i])
+            fill = fills.get(fill_code[i])
+            capacity = caps.get(cap_code[i])
+            prop = props.get(props_code[i])
+            mode = None if prop is None else prop & 0x3
+            if mode is not None:
+                if mode == 0:  # "Aus" — pump not in use
+                    continue
+            elif not name and not fill:  # mode unknown: fall back to config signals
+                continue
+            percent = (
+                round(fill / capacity * 100) if capacity and fill is not None else None
+            )
+            result.append(
+                {
+                    "index": i,
+                    "name": name,
+                    "fill_ml": fill,
+                    "capacity_ml": capacity,
+                    "percent": percent,
+                    "mode": DOSING_MODES.get(mode) if mode is not None else None,
+                }
+            )
+        return result
+
     def alarm(self) -> bool | None:
         raw = self._get_int(CODE_IS_ALARM, signed=False)
         return None if raw is None else raw != 0
@@ -692,6 +748,7 @@ class Controller:
             "sensors": self.sensors(0),
             "sockets": self.sockets(0),
             "levels": self.levels(),
+            "dosing_pumps": self.dosing_pumps(),
         }
 
 
