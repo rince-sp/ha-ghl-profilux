@@ -174,4 +174,8 @@ class ProfiluxDashboardStrategy {
   }
 }
 
-customElements.define("ll-strategy-dashboard-profilux", ProfiluxDashboardStrategy);
+// Guard so loading this module twice (e.g. as a frontend extra *and* a Lovelace
+// resource) doesn't throw "already defined".
+if (!customElements.get("ll-strategy-dashboard-profilux")) {
+  customElements.define("ll-strategy-dashboard-profilux", ProfiluxDashboardStrategy);
+}

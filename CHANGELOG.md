@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loops paired with their min/max float switches — with icons and colour. The
   bundled example dashboard mirrors the same layout, and the README documents
   how to install the strategy dashboard step by step.
+- The strategy module now guards its own custom-element registration, so it is
+  safe to load both as a frontend extra and as a Lovelace resource (a reliable
+  fallback when the mobile app caches the frontend). The README's troubleshooting
+  covers the "Timeout waiting for strategy element" case.
 
 ## [1.5.1] - 2026-07-22
 

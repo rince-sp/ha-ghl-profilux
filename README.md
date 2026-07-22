@@ -141,11 +141,19 @@ strategy:
   title: Reef Tank
 ```
 
-> **`custom:profilux` not found?** The browser caches frontend resources. Do a
-> hard refresh (Ctrl/Cmd-Shift-R) or clear the cache and reload. If it still
-> can't be found, confirm the integration is loaded (Settings → Devices &
-> Services → ProfiLux) and restart Home Assistant once — the resource is added
-> on integration setup.
+> **`custom:profilux` not found, or "Timeout waiting for strategy element
+> `ll-strategy-dashboard-profilux`"?** The frontend just hasn't loaded the
+> strategy module yet — it's cached, especially in the **mobile app**. In order:
+>
+> 1. **Hard-refresh** the browser (Ctrl/Cmd-Shift-R). In the companion app:
+>    **App configuration → Debugging → Reset frontend cache**, then reopen.
+> 2. Confirm the integration is loaded (Settings → Devices & Services → ProfiLux)
+>    and **restart Home Assistant** once — the module is registered on setup.
+> 3. Still stuck? Register the module as a **dashboard resource** explicitly:
+>    **Settings → Dashboards → ⋯ (top-right) → Resources → Add resource**, URL
+>    `/profilux_frontend/profilux-strategy.js`, type **JavaScript Module**, save,
+>    then hard-refresh. (The module is safe to load twice — it guards its own
+>    registration.)
 
 ### Static YAML dashboard
 
