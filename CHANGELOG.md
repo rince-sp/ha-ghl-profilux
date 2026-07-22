@@ -5,6 +5,25 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-07-22
+
+### Added
+- **Level-loop float sensors.** Each level control loop now exposes its assigned
+  float switches as **min / max** binary sensors (wet/dry), decoded from the
+  loop's source configuration (sensor number = `(SOURCES >> 4) + 1`, verified
+  against the app: Nachfüllbecken → 3 & 4, Technikbecken → 5 & 7). The loop's
+  status sensor gains `active` and `sensors` attributes, so a one- vs two-sensor
+  loop is reflected directly.
+- **Dynamic discovery & live names.** Sensors, sockets, dosing pumps and level
+  sensors are now discovered on every poll, so a pump activated or a socket
+  added on the controller appears without reloading the integration; likewise a
+  **rename** on the controller updates the entity's friendly name on the next
+  poll (its entity_id stays stable).
+
+### Changed
+- The diagnostic dump reads the confirmed level source/props scheme
+  (`801 + loop*1000 + sub*4`) and decodes each sub-control's sensor number.
+
 ## [1.4.0] - 2026-07-22
 
 ### Added
@@ -88,6 +107,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[1.5.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.0
 [1.4.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.4.0
 [1.3.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.3.0
 [1.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.2.0

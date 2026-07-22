@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import ProfiluxCoordinator
-from .entity import ProfiluxEntity
+from .entity import ProfiluxEntity, async_add_discovered
 
 
 async def async_setup_entry(
@@ -25,20 +25,27 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Create one binary sensor per socket, plus the alarm indicator."""
+    """Create socket/level/alarm binary sensors, and more as they appear."""
     coordinator: ProfiluxCoordinator = hass.data[DOMAIN][entry.entry_id]
-    data = coordinator.data or {}
 
-    entities: list[BinarySensorEntity] = [
-        ProfiluxSocket(coordinator, socket["index"]) for socket in data.get("sockets", [])
-    ]
-    entities += [
-        ProfiluxLevelAlarm(coordinator, level["index"]) for level in data.get("levels", [])
-    ]
-    if data.get("alarm") is not None:
-        entities.append(ProfiluxAlarm(coordinator))
+    def _builder(data: dict[str, Any]):
+        for socket in data.get("sockets", []):
+            yield ("socket", socket["index"]), (
+                lambda i=socket["index"]: ProfiluxSocket(coordinator, i)
+            )
+        for level in data.get("levels", []):
+            yield ("level_alarm", level["index"]), (
+                lambda i=level["index"]: ProfiluxLevelAlarm(coordinator, i)
+            )
+            # One float-switch sensor per assigned level sensor (min / max).
+            for sensor in level.get("sensors", []):
+                yield ("level_float", level["index"], sensor["role"]), (
+                    lambda i=level["index"], r=sensor["role"]: ProfiluxLevelFloat(coordinator, i, r)
+                )
+        if data.get("alarm") is not None:
+            yield ("alarm",), (lambda: ProfiluxAlarm(coordinator))
 
-    async_add_entities(entities)
+    async_add_discovered(coordinator, entry, async_add_entities, _builder)
 
 
 class ProfiluxSocket(ProfiluxEntity, BinarySensorEntity):
@@ -50,8 +57,11 @@ class ProfiluxSocket(ProfiluxEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self._index = index
         self._attr_unique_id = f"{coordinator.entry.entry_id}_socket_{index}"
+
+    @property
+    def name(self) -> str | None:
         data = self._socket_data or {}
-        self._attr_name = data.get("name") or f"Socket {index + 1}"
+        return data.get("name") or f"Socket {self._index + 1}"
 
     @property
     def _socket_data(self) -> dict[str, Any] | None:
@@ -85,9 +95,11 @@ class ProfiluxLevelAlarm(ProfiluxEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self._index = index
         self._attr_unique_id = f"{coordinator.entry.entry_id}_level_{index}_alarm"
+
+    @property
+    def name(self) -> str | None:
         data = self._level_data or {}
-        name = data.get("name") or f"Level {index + 1}"
-        self._attr_name = f"{name} alarm"
+        return f"{data.get('name') or f'Level {self._index + 1}'} alarm"
 
     @property
     def _level_data(self) -> dict[str, Any] | None:
@@ -109,6 +121,49 @@ class ProfiluxLevelAlarm(ProfiluxEntity, BinarySensorEntity):
     @property
     def available(self) -> bool:
         return super().available and self._level_data is not None
+
+
+class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
+    """One float switch assigned to a level loop (min or max), wet/dry."""
+
+    _attr_device_class = BinarySensorDeviceClass.MOISTURE
+
+    def __init__(self, coordinator: ProfiluxCoordinator, index: int, role: str) -> None:
+        super().__init__(coordinator)
+        self._index = index
+        self._role = role
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_level_{index}_float_{role}"
+        self._attr_icon = "mdi:arrow-down-bold" if role == "min" else "mdi:arrow-up-bold"
+
+    @property
+    def _sensor(self) -> dict[str, Any] | None:
+        for level in (self.coordinator.data or {}).get("levels", []):
+            if level["index"] == self._index:
+                for sensor in level.get("sensors", []):
+                    if sensor["role"] == self._role:
+                        return {"level_name": level.get("name"), **sensor}
+        return None
+
+    @property
+    def name(self) -> str | None:
+        data = self._sensor or {}
+        base = data.get("level_name") or f"Level {self._index + 1}"
+        label = "min" if self._role == "min" else "max"
+        return f"{base} {label} float"
+
+    @property
+    def is_on(self) -> bool | None:
+        data = self._sensor
+        return None if data is None else data.get("triggered")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._sensor or {}
+        return {"sensor_number": data.get("number")}
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._sensor is not None
 
 
 class ProfiluxAlarm(ProfiluxEntity, BinarySensorEntity):

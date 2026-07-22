@@ -45,8 +45,14 @@ class ProfiluxDashboardStrategy {
     const alarms = ids.filter(
       (id) => id.startsWith("binary_sensor.") && id.endsWith("_alarm")
     );
+    const floats = ids.filter(
+      (id) => id.startsWith("binary_sensor.") && /_(min|max)_float$/.test(id)
+    );
     const sockets = ids.filter(
-      (id) => id.startsWith("binary_sensor.") && !id.endsWith("_alarm")
+      (id) =>
+        id.startsWith("binary_sensor.") &&
+        !id.endsWith("_alarm") &&
+        !/_(min|max)_float$/.test(id)
     );
 
     const gaugeCard = (id) => {
@@ -104,12 +110,13 @@ class ProfiluxDashboardStrategy {
         ],
       });
     }
-    if (status.length || alarms.length) {
+    if (status.length || alarms.length || floats.length) {
       sections.push({
         type: "grid",
         cards: [
           heading("Niveau & Alarm", "mdi:water-percent"),
           ...status.map((id) => tile(id, 6)),
+          ...floats.map((id) => tile(id, 6)),
           ...alarms.map((id) => tile(id, 6)),
         ],
       });

@@ -109,9 +109,9 @@ def main() -> int:
         for code, fields in sorted(sweep.items()):
             shown = ", ".join(f"[{i}]={f}" for i, f in enumerate(fields) if f) or "(all zero)"
             print(f"  code {code}: {shown}")
-        print("\nLEVEL sources — full 3-word block per loop (idx: [w0, w1, w2]):")
-        for i, words in sorted((dump.get("level_sources_full") or {}).items()):
-            print(f"  [{i}] {words}")
+        print("\nLEVEL config — per loop: props / sources / decoded sensor#:")
+        for i, blk in sorted((dump.get("level_sources_full") or {}).items()):
+            print(f"  [{i}] props={blk['props']} sources={blk['sources']} sensors={blk['sensor_nrs']}")
         return 0
 
     order = (
@@ -169,7 +169,12 @@ def main() -> int:
             f"{k}={v}" for k, v in (("alarm", lv["alarm"]), ("fill", lv["fill"]), ("drain", lv["drain"]))
             if v is not None
         )
-        print(f"  [{lv['index']}] {name:<24} {flags or '(no state)'}")
+        sensors = ", ".join(
+            f"{s['role']}=Sensor {s['number']}"
+            + ("" if s["triggered"] is None else f"({'wet' if s['triggered'] else 'dry'})")
+            for s in lv.get("sensors", [])
+        )
+        print(f"  [{lv['index']}] {name:<24} {flags or '(no state)'}" + (f"  [{sensors}]" if sensors else ""))
 
     print("\nDosing pumps:")
     if not data.get("dosing_pumps"):

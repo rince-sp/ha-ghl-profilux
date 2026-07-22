@@ -54,9 +54,18 @@ CODE_SOCKET_FUNCTION = 756     # + block(i, 24, 1); config bitfield (0 = unused)
 # Level ("Niveau") control loops
 CODE_LEVEL_STATE = 10070       # + block(i, 3, 1); packed: alarm/fill/drain/water
 CODE_LEVEL_INPUT_STATE = 10074  # + block(i, 4, 1); delayed/previous/undelayed
-CODE_LEVEL_SOURCES = 928       # + block(i, 3, 3); source1 = &0xf, source2 = (>>4)&0xf
 CODE_LEVEL_NAME = 18128        # + block(i, 64, 1); text
 CODE_GET_LEVEL_COUNT = 10503
+
+# Level-loop configuration (mirrors the GHL backup's LEVELSENSORCONTROL block).
+# Each loop has three sub-controls; the two assigned float sensors ("Sensor 1" /
+# "Sensor 2" in the app) are the first and third. Per loop g, sub n:
+#   props   = 800 + g*1000 + n*4   (bit 0 = active)
+#   sources = 801 + g*1000 + n*4   (assigned sensor number = (value >> 4) + 1)
+CODE_LEVEL_CTRL_PROPS = 800
+CODE_LEVEL_CTRL_SOURCES = 801
+LEVEL_SUB_STRIDE = 4
+LEVEL_SENSOR_SUBS = (0, 2)     # sub-controls that carry the min / max float sensor
 
 # Dosing pumps ("Dosierpumpen"). Four pumps per mega-block group.
 CODE_DOSING_PROPS = 480         # + block(i, 4, 26); low 2 bits = schedule mode
@@ -78,7 +87,7 @@ CODE_IS_ALARM = 10090
 
 MAX_SENSORS = 16
 MAX_SOCKETS = 24
-MAX_LEVELS = 3
+MAX_LEVELS = 4
 MEGA_BLOCK_SIZE = 1000
 
 # type id -> (label, unit, HA device_class or None), from the GHL sensor map.
@@ -716,6 +725,18 @@ class Controller:
         name_code = {i: CODE_LEVEL_NAME + _block_offset(i, 64, 1) for i in idxs}
         names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
 
+        # Per-loop config: the two float sensors (min = sub 0, max = sub 2) and
+        # whether the loop is active. Sensor number = (SOURCES >> 4) + 1; its live
+        # state is the matching bit of the digital-input mask (sensor N -> bit N-1).
+        src_code = {
+            (i, sub): CODE_LEVEL_CTRL_SOURCES + i * MEGA_BLOCK_SIZE + sub * LEVEL_SUB_STRIDE
+            for i in idxs for sub in LEVEL_SENSOR_SUBS
+        }
+        prop_code = {i: CODE_LEVEL_CTRL_PROPS + i * MEGA_BLOCK_SIZE for i in idxs}
+        sources = self._t.get_many_int(list(src_code.values()), signed=False)
+        props = self._t.get_many_int(list(prop_code.values()), signed=False)
+        di_mask = self._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
+
         present = [i for i in idxs if state_code[i] in states or names.get(name_code[i])]
         result: list[dict[str, Any]] = []
         for i in present:
@@ -730,6 +751,22 @@ class Controller:
                 fill = bool(v & 0x1)
                 v >>= 1
                 alarm = bool(v & 0x1)
+
+            prop = props.get(prop_code[i])
+            active = None if prop is None else bool(prop & 0x1)
+            sensors: list[dict[str, Any]] = []
+            seen: set[int] = set()
+            for role, sub in zip(("min", "max"), LEVEL_SENSOR_SUBS):
+                src = sources.get(src_code[(i, sub)])
+                if src is None:
+                    continue
+                number = (src >> 4) + 1  # 1-based float-sensor / digital-input number
+                if number in seen:
+                    continue  # single-sensor loop: both sub-controls point at one sensor
+                seen.add(number)
+                triggered = None if di_mask is None else bool((di_mask >> (number - 1)) & 1)
+                sensors.append({"role": role, "number": number, "triggered": triggered})
+
             result.append(
                 {
                     "index": i,
@@ -737,6 +774,8 @@ class Controller:
                     "alarm": alarm,
                     "fill": fill,
                     "drain": drain,
+                    "active": active,
+                    "sensors": sensors,
                 }
             )
         return result
@@ -800,7 +839,8 @@ def diagnostic(
         k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in wide}
         l_state_c = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in range(4)}
         l_input_c = {i: CODE_LEVEL_INPUT_STATE + _block_offset(i, 4, 1) for i in range(4)}
-        l_source_c = {i: CODE_LEVEL_SOURCES + _block_offset(i, 3, 3) for i in range(4)}
+        # Confirmed level-loop source scheme: per loop i, sub n -> 801 + i*1000 + n*4.
+        l_source_c = {i: CODE_LEVEL_CTRL_SOURCES + i * MEGA_BLOCK_SIZE for i in range(4)}
         l_name_c = {i: CODE_LEVEL_NAME + _block_offset(i, 64, 1) for i in range(4)}
         probe_codes = list(range(10124, 10146))  # around SP_ALL_STATE/CURRENT
 
@@ -815,13 +855,17 @@ def diagnostic(
         # in case a second socket bank lives there.
         hi_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) + MEGA_BLOCK_SIZE for i in range(16, 24)}
 
-        # Level-loop config. Each loop's source block is *three* words (not one),
-        # so read all three per loop — the two assigned float sensors ("Sensor 1"
-        # / "Sensor 2" in the app) live in this block, and whether a loop uses one
-        # or two of them depends on its operating mode ("Betriebsmodus").
+        # Level-loop config. Each loop has three sub-controls (props/sources/
+        # maxduration), stride 4; the two assigned float sensors live in subs
+        # 0 and 2. Dump all three subs' sources + props per loop.
         NLV = 4
         l_srcfull_c = {
-            (i, w): CODE_LEVEL_SOURCES + _block_offset(i, 3, 3) + w
+            (i, w): CODE_LEVEL_CTRL_SOURCES + i * MEGA_BLOCK_SIZE + w * LEVEL_SUB_STRIDE
+            for i in range(NLV)
+            for w in range(3)
+        }
+        l_props_c = {
+            (i, w): CODE_LEVEL_CTRL_PROPS + i * MEGA_BLOCK_SIZE + w * LEVEL_SUB_STRIDE
             for i in range(NLV)
             for w in range(3)
         }
@@ -838,6 +882,7 @@ def diagnostic(
         # Read the important small probes early, before the connection has done a
         # lot of work — the controller gets lossy under sustained polling.
         l_srcfull = transport.get_many_int(list(l_srcfull_c.values()), signed=False)
+        l_propsfull = transport.get_many_int(list(l_props_c.values()), signed=False)
         sweep_raw = transport.get_many_int(sweep_codes, signed=False)
         hi_states = transport.get_many_int(list(hi_state_c.values()), signed=False)
         digital_inputs = ctrl._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
@@ -886,9 +931,18 @@ def diagnostic(
     current_sweep = {code: _decode_16bit_fields(val) for code, val in sweep_raw.items() if val}
     hi_bank = {i: hi_states.get(hi_state_c[i]) for i in range(16, 24) if hi_states.get(hi_state_c[i]) is not None}
 
-    # Full 3-word source block per level loop.
+    # Per level loop: each sub-control's props/sources, plus the decoded sensor
+    # number (= (sources >> 4) + 1) so the app's "Sensor N" can be lined up.
     level_sources_full = {
-        i: [l_srcfull.get(l_srcfull_c[(i, w)]) for w in range(3)] for i in range(NLV)
+        i: {
+            "props": [l_propsfull.get(l_props_c[(i, w)]) for w in range(3)],
+            "sources": [l_srcfull.get(l_srcfull_c[(i, w)]) for w in range(3)],
+            "sensor_nrs": [
+                None if (s := l_srcfull.get(l_srcfull_c[(i, w)])) is None else (s >> 4) + 1
+                for w in range(3)
+            ],
+        }
+        for i in range(NLV)
     }
 
     return {

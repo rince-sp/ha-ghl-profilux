@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, MAINS_VOLTAGE
 from .coordinator import ProfiluxCoordinator
-from .entity import ProfiluxEntity
+from .entity import ProfiluxEntity, async_add_discovered
 
 
 def _socket_currents(coordinator: ProfiluxCoordinator) -> list[float]:
@@ -39,39 +39,41 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Create sensor entities from the first coordinator snapshot."""
+    """Create sensor entities, and keep creating them as items appear."""
     coordinator: ProfiluxCoordinator = hass.data[DOMAIN][entry.entry_id]
-    sensors: list[dict[str, Any]] = (coordinator.data or {}).get("sensors", [])
 
-    type_counts: dict[str, int] = {}
-    for sensor in sensors:
-        type_counts[sensor["label"]] = type_counts.get(sensor["label"], 0) + 1
+    def _builder(data: dict[str, Any]):
+        sensors: list[dict[str, Any]] = data.get("sensors", [])
+        type_counts: dict[str, int] = {}
+        for sensor in sensors:
+            type_counts[sensor["label"]] = type_counts.get(sensor["label"], 0) + 1
+        for sensor in sensors:
+            suffix = _unique_suffix(sensor, type_counts)
+            yield ("sensor", sensor["index"]), (
+                lambda i=sensor["index"], s=suffix: ProfiluxSensor(coordinator, i, s)
+            )
+        # One current sensor per socket that reports a draw (digital powerbar).
+        for socket in data.get("sockets", []):
+            if socket.get("current") is not None:
+                yield ("current", socket["index"]), (
+                    lambda i=socket["index"]: ProfiluxSocketCurrent(coordinator, i)
+                )
+        # Aggregate current + estimated power across the powerbar.
+        if any(s.get("current") is not None for s in data.get("sockets", [])):
+            yield ("total_current",), (lambda: ProfiluxTotalCurrent(coordinator))
+            yield ("total_power",), (lambda: ProfiluxTotalPower(coordinator))
+        # A status text per level control loop.
+        for level in data.get("levels", []):
+            yield ("level_status", level["index"]), (
+                lambda i=level["index"]: ProfiluxLevelStatus(coordinator, i)
+            )
+        # Remaining reservoir volume per in-use dosing pump.
+        for pump in data.get("dosing_pumps", []):
+            yield ("dosing", pump["index"]), (
+                lambda i=pump["index"]: ProfiluxDosingPump(coordinator, i)
+            )
 
-    entities: list[SensorEntity] = [
-        ProfiluxSensor(coordinator, sensor["index"], _unique_suffix(sensor, type_counts))
-        for sensor in sensors
-    ]
-    # One current sensor per socket that reports a draw (digital powerbar).
-    entities += [
-        ProfiluxSocketCurrent(coordinator, socket["index"])
-        for socket in (coordinator.data or {}).get("sockets", [])
-        if socket.get("current") is not None
-    ]
-    # Aggregate current + estimated power across the powerbar.
-    if _socket_currents(coordinator):
-        entities.append(ProfiluxTotalCurrent(coordinator))
-        entities.append(ProfiluxTotalPower(coordinator))
-    # A status text per level control loop.
-    entities += [
-        ProfiluxLevelStatus(coordinator, level["index"])
-        for level in (coordinator.data or {}).get("levels", [])
-    ]
-    # Remaining reservoir volume per configured dosing pump.
-    entities += [
-        ProfiluxDosingPump(coordinator, pump["index"])
-        for pump in (coordinator.data or {}).get("dosing_pumps", [])
-    ]
-    async_add_entities(entities)
+    async_add_discovered(coordinator, entry, async_add_entities, _builder)
 
 
 class ProfiluxSensor(ProfiluxEntity, SensorEntity):
@@ -85,7 +87,6 @@ class ProfiluxSensor(ProfiluxEntity, SensorEntity):
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{suffix}"
 
         data = self._sensor_data or {}
-        self._attr_name = data.get("name") or data.get("label") or f"Sensor {index + 1}"
         self._attr_native_unit_of_measurement = data.get("unit")
 
         device_class = data.get("device_class")
@@ -95,6 +96,11 @@ class ProfiluxSensor(ProfiluxEntity, SensorEntity):
         decimals = data.get("decimals")
         if isinstance(decimals, int):
             self._attr_suggested_display_precision = decimals
+
+    @property
+    def name(self) -> str | None:
+        data = self._sensor_data or {}
+        return data.get("name") or data.get("label") or f"Sensor {self._index + 1}"
 
     @property
     def _sensor_data(self) -> dict[str, Any] | None:
@@ -125,9 +131,11 @@ class ProfiluxSocketCurrent(ProfiluxEntity, SensorEntity):
         super().__init__(coordinator)
         self._index = index
         self._attr_unique_id = f"{coordinator.entry.entry_id}_socket_{index}_current"
+
+    @property
+    def name(self) -> str | None:
         data = self._socket_data or {}
-        name = data.get("name") or f"Socket {index + 1}"
-        self._attr_name = f"{name} current"
+        return f"{data.get('name') or f'Socket {self._index + 1}'} current"
 
     @property
     def _socket_data(self) -> dict[str, Any] | None:
@@ -196,9 +204,11 @@ class ProfiluxDosingPump(ProfiluxEntity, SensorEntity):
         super().__init__(coordinator)
         self._index = index
         self._attr_unique_id = f"{coordinator.entry.entry_id}_dosing_{index}_fill"
+
+    @property
+    def name(self) -> str | None:
         data = self._pump_data or {}
-        name = data.get("name") or f"Dosing pump {index + 1}"
-        self._attr_name = f"{name} fill level"
+        return f"{data.get('name') or f'Dosing pump {self._index + 1}'} fill level"
 
     @property
     def _pump_data(self) -> dict[str, Any] | None:
@@ -235,9 +245,11 @@ class ProfiluxLevelStatus(ProfiluxEntity, SensorEntity):
         super().__init__(coordinator)
         self._index = index
         self._attr_unique_id = f"{coordinator.entry.entry_id}_level_{index}_status"
+
+    @property
+    def name(self) -> str | None:
         data = self._level_data or {}
-        name = data.get("name") or f"Level {index + 1}"
-        self._attr_name = f"{name} status"
+        return f"{data.get('name') or f'Level {self._index + 1}'} status"
 
     @property
     def _level_data(self) -> dict[str, Any] | None:
@@ -245,6 +257,17 @@ class ProfiluxLevelStatus(ProfiluxEntity, SensorEntity):
             if level["index"] == self._index:
                 return level
         return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._level_data or {}
+        return {
+            "active": data.get("active"),
+            "sensors": [
+                {"role": s["role"], "sensor": s["number"], "triggered": s["triggered"]}
+                for s in data.get("sensors", [])
+            ],
+        }
 
     @property
     def native_value(self) -> str | None:
