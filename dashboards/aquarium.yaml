@@ -2,9 +2,9 @@
 #
 # Sensor gauges + power-socket outlet tiles + level/alarm row.
 #
-# Entity IDs below match a ProfiLux whose sockets are named as on this install;
-# adjust the `entity:` values to your own socket/sensor entity IDs if they differ
-# (Settings -> Devices & Services -> Entities, filter "profilux").
+# The `entity:` IDs below are placeholders — replace them with your own
+# socket/sensor entity IDs (Settings -> Devices & Services -> Entities, filter
+# "profilux"), or use the auto-generating strategy dashboard, which needs none.
 #
 # How to use — pick one:
 #   A) Quick: Settings -> Dashboards -> Add dashboard -> New dashboard -> take
@@ -71,31 +71,23 @@ views:
           - type: heading
             heading: Schaltkanäle
             icon: mdi:power-socket-de
-          - { type: tile, entity: binary_sensor.profilux_zeovit_reaktor, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_ozon_sander, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_ozon_luft, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_pumpe_uv, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
+          # Placeholder entity IDs — replace with your own socket entity IDs
+          # (Settings -> Devices & Services -> Entities, filter "profilux"), or
+          # just use the auto-generating strategy dashboard instead.
+          - { type: tile, entity: binary_sensor.profilux_socket_1, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
+          - { type: tile, entity: binary_sensor.profilux_socket_2, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
+          - { type: tile, entity: binary_sensor.profilux_socket_3, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
+          - { type: tile, entity: binary_sensor.profilux_socket_4, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
           - { type: tile, entity: binary_sensor.profilux_socket_5, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
           - { type: tile, entity: binary_sensor.profilux_socket_6, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_d_d_kh_manager, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
+          - { type: tile, entity: binary_sensor.profilux_socket_7, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
           - { type: tile, entity: binary_sensor.profilux_socket_8, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_kalkruhrer, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_mediareaktor, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_dosierer_balling, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_helix_skim_clean, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_magnetventil, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_ato_pumpe, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_osmose_anlage, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_uv_lamp, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_orphek_or4, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_virtuelller_scha, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
 
       - type: grid
         cards:
           - type: heading
             heading: Niveau & Alarm
             icon: mdi:water-percent
-          - { type: tile, entity: binary_sensor.profilux_nachfullbecken_alarm, name: Nachfüllbecken, grid_options: { columns: 6 } }
-          - { type: tile, entity: binary_sensor.profilux_technikbecken_alarm, name: Technikbecken, grid_options: { columns: 6 } }
-          - { type: tile, entity: binary_sensor.profilux_level_3_alarm, name: Regelkreis 3, grid_options: { columns: 6 } }
+          - { type: tile, entity: binary_sensor.profilux_level_1_alarm, name: Level 1, grid_options: { columns: 6 } }
+          - { type: tile, entity: binary_sensor.profilux_level_2_alarm, name: Level 2, grid_options: { columns: 6 } }
           - { type: tile, entity: binary_sensor.profilux_alarm, name: Controller Alarm, grid_options: { columns: 6 } }

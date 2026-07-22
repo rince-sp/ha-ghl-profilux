@@ -57,9 +57,9 @@ the integration only relies on the registers that read reliably there:
 - **Frame checksums (BCA/BCC) are validated**, so the occasional corrupted or
   merged reply the controller emits under rapid polling is rejected and retried.
 - **Sockets** are read from the per-socket state register (physical sockets)
-  plus any named virtual/expansion outputs. A named output whose state isn't in
-  the standard register (e.g. an Orphek light channel or a virtual switch) is
-  listed with an unknown state for now.
+  plus any named virtual/expansion outputs. Higher switching channels beyond the
+  first bank derive their on/off state and current from the powerbar's next
+  current bank.
 
 ## Requirements
 
@@ -74,7 +74,7 @@ From any machine on the same network as the controller:
 
 ```bash
 # auto-detects whether your controller answers on HTTP or WebSocket:
-python scraper.py 192.168.1.221 --username admin --password YOURPASS
+python scraper.py 192.168.1.50 --username admin --password YOURPASS
 ```
 
 It prints the working interface, the device info, all sensor readings, and each

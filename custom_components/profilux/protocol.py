@@ -615,9 +615,8 @@ class Controller:
 
         The current array holds only 16 sockets; higher channels live in the
         next bank at the ``+1000`` mega-block offset (socket ``i`` → bank
-        ``i // 16``, field ``i % 16``). Bank 0 gave e.g. the UV lamp at field
-        15; bank 1 (code 11128) carries channel 17/18 (an Orphek light, a pump)
-        whose draw the app shows but the first bank never held.
+        ``i // 16``, field ``i % 16``). So bank 1 (code 11128) carries the draw
+        of channels 17+ that the app shows but the first bank never held.
         """
         currents: dict[int, float] = {}
         banks = (MAX_SOCKETS + 15) // 16
@@ -845,7 +844,7 @@ def diagnostic(
         probe_codes = list(range(10124, 10146))  # around SP_ALL_STATE/CURRENT
 
         # Targeted current probe. The powerbar current array (10128) only carries
-        # the first 16 sockets, so channels 16+ (e.g. an Orphek light, a virtual
+        # the first 16 sockets, so channels 16+ (e.g. a light channel or a virtual
         # channel) draw current the app shows but that array doesn't hold. A broad
         # sweep overloads the controller (it starts dropping frames), so probe
         # only the likely spots: the neighbouring array (10127) and the +1000 /

@@ -7,11 +7,11 @@ confirming *which local interface* your controller answers on (and your
 credentials) before deploying to Home Assistant.
 
     # auto-detect the interface (tries HTTP, then WebSocket):
-    python scraper.py 192.168.1.221 --username admin --password YOURPASS
+    python scraper.py 192.168.1.50 --username admin --password YOURPASS
 
     # force one interface:
-    python scraper.py 192.168.1.221 --interface http  --password YOURPASS
-    python scraper.py 192.168.1.221 --interface websocket --password YOURPASS
+    python scraper.py 192.168.1.50 --interface http  --password YOURPASS
+    python scraper.py 192.168.1.50 --interface websocket --password YOURPASS
 
 The WebSocket interface additionally needs:  pip install "websocket-client>=1.6.0"
 """
@@ -42,7 +42,7 @@ def _try(host: str, user: str, password: str, interface: str, read_names: bool):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read all data from a GHL ProfiLux controller.")
-    parser.add_argument("host", help="Controller IP address, e.g. 192.168.1.221")
+    parser.add_argument("host", help="Controller IP address, e.g. 192.168.1.50")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--password", default="")
     parser.add_argument(
