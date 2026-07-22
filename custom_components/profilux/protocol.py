@@ -56,6 +56,10 @@ CODE_SOCKET_NAME = 18064       # + block(i, 64, 1); text
 # a controller. Remembering the prior value is how automatic control is restored.
 CODE_SOCKET_FUNCTION = 779     # + block(i, 16, 1)
 SOCKET_FUNCTION_BLOCK = 16
+# "Function" values for the two permanent manual modes (confirmed on a ProfiLux 4
+# — universal across sockets, since these modes carry no sensor/timer binding):
+SOCKET_FUNCTION_ALWAYS_ON = 59392    # 0xE800 — "Immer an"
+SOCKET_FUNCTION_ALWAYS_OFF = 61440   # 0xF000 — "Immer aus"
 
 # Manual socket override via "Maintenance" (Wartung) — the GHL-documented way to
 # force sockets on/off. A maintenance *program* p (mega-block +1000*p) carries a
