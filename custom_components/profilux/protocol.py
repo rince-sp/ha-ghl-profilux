@@ -727,38 +727,26 @@ def diagnostic(
         l_name_c = {i: CODE_LEVEL_NAME + _block_offset(i, 64, 1) for i in range(4)}
         probe_codes = list(range(10124, 10146))  # around SP_ALL_STATE/CURRENT
 
-        # Wide current sweep: the powerbar current array (10128) only carries the
-        # first 16 sockets, so channels 16+ (e.g. an Orphek light, a virtual
-        # channel) draw current the app shows but that array doesn't hold. Scan a
-        # broad code range plus the +1000 mega-block banks and decode each value
-        # as 16-bit little-endian mA fields, so a single run pinpoints whichever
-        # register carries the higher channels' current.
-        sweep_codes = (
-            list(range(10124, 10160))
-            + list(range(11124, 11160))
-            + list(range(12124, 12160))
-        )
-        # Also probe socket state/name for the higher channels via the +1000
-        # mega-block, in case a second socket bank lives there.
+        # Targeted current probe. The powerbar current array (10128) only carries
+        # the first 16 sockets, so channels 16+ (e.g. an Orphek light, a virtual
+        # channel) draw current the app shows but that array doesn't hold. A broad
+        # sweep overloads the controller (it starts dropping frames), so probe
+        # only the likely spots: the neighbouring array (10127) and the +1000 /
+        # +2000 mega-block banks, decoded as 16-bit little-endian mA fields.
+        sweep_codes = [10127, 10128, 11127, 11128, 12127, 12128, 10136, 10144, 10145]
+        # Also probe socket state for the higher channels via the +1000 mega-block,
+        # in case a second socket bank lives there.
         hi_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) + MEGA_BLOCK_SIZE for i in range(16, 24)}
 
         # Level-loop config. Each loop's source block is *three* words (not one),
         # so read all three per loop — the two assigned float sensors ("Sensor 1"
         # / "Sensor 2" in the app) live in this block, and whether a loop uses one
-        # or two of them depends on its operating mode ("Betriebsmodus"). Also
-        # sweep a nearby config band per loop to locate the operating-mode
-        # register (an inactive loop should read 0 where active ones don't).
+        # or two of them depends on its operating mode ("Betriebsmodus").
         NLV = 4
         l_srcfull_c = {
             (i, w): CODE_LEVEL_SOURCES + _block_offset(i, 3, 3) + w
             for i in range(NLV)
             for w in range(3)
-        }
-        cfg_band = range(900, 961)
-        l_cfg_c = {
-            (base, i): base + _block_offset(i, 3, 1)
-            for base in cfg_band
-            for i in range(NLV)
         }
 
         s_types = transport.get_many_int(list(s_type_c.values()), signed=False)
@@ -770,13 +758,14 @@ def diagnostic(
         l_inputs = transport.get_many_int(list(l_input_c.values()), signed=False)
         l_sources = transport.get_many_int(list(l_source_c.values()), signed=False)
         l_names = transport.get_many_text(list(l_name_c.values()))
+        # Read the important small probes early, before the connection has done a
+        # lot of work — the controller gets lossy under sustained polling.
+        l_srcfull = transport.get_many_int(list(l_srcfull_c.values()), signed=False)
+        sweep_raw = transport.get_many_int(sweep_codes, signed=False)
+        hi_states = transport.get_many_int(list(hi_state_c.values()), signed=False)
         digital_inputs = ctrl._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
         digital_input_count = ctrl._get_int(CODE_GET_DIGITAL_INPUT_COUNT, signed=False)
         probes = transport.get_many_int(probe_codes, signed=False)
-        sweep_raw = transport.get_many_int(sweep_codes, signed=False)
-        hi_states = transport.get_many_int(list(hi_state_c.values()), signed=False)
-        l_srcfull = transport.get_many_int(list(l_srcfull_c.values()), signed=False)
-        l_cfg = transport.get_many_int(list(l_cfg_c.values()), signed=False)
         all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
         socket_currents = _decode_socket_currents(
             ctrl._get_int(CODE_SOCKET_CURRENT_ARRAY, signed=False)
@@ -816,29 +805,16 @@ def diagnostic(
         }
         for i in range(4)
     ]
-    # Any swept code whose decoded 16-bit fields look like plausible currents
-    # (at least one field in the 20 mA – 5 A range) is a candidate register for
-    # the higher channels' current.
-    current_sweep = {}
-    for code, val in sweep_raw.items():
-        fields = _decode_16bit_fields(val)
-        if any(20 <= f <= 5000 for f in fields):
-            current_sweep[code] = fields
+    # Each probed current code, decoded into its 16-bit little-endian fields, so
+    # a field near 0.8-0.9 A on channel 16/17 (or in a mega-block bank) reveals
+    # the register that carries the higher channels' current.
+    current_sweep = {code: _decode_16bit_fields(val) for code, val in sweep_raw.items() if val}
     hi_bank = {i: hi_states.get(hi_state_c[i]) for i in range(16, 24) if hi_states.get(hi_state_c[i]) is not None}
 
     # Full 3-word source block per level loop.
     level_sources_full = {
         i: [l_srcfull.get(l_srcfull_c[(i, w)]) for w in range(3)] for i in range(NLV)
     }
-    # Config-band candidates: bases whose per-loop values look like small
-    # ids/modes (0-255) and are not identical across every loop — the operating
-    # mode should read 0 on an inactive loop and non-zero on active ones.
-    level_cfg_band = {}
-    for base in cfg_band:
-        vals = [l_cfg.get(l_cfg_c[(base, i)]) for i in range(NLV)]
-        present = [v for v in vals if v is not None]
-        if present and all(v <= 255 for v in present) and len(set(present)) > 1:
-            level_cfg_band[base] = vals
 
     return {
         "counts": counts,
@@ -850,7 +826,6 @@ def diagnostic(
         "current_sweep": current_sweep,
         "hi_bank_state": hi_bank,
         "level_sources_full": level_sources_full,
-        "level_cfg_band": level_cfg_band,
         "sensors": sensors,
         "sockets": sockets,
         "levels": levels,

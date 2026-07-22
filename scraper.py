@@ -102,22 +102,16 @@ def main() -> int:
         print("\nHIGHER SOCKET BANK state (mega-block, idx 16-23):")
         hb = dump.get("hi_bank_state") or {}
         print(f"  {hb!r}" if hb else "  (no second bank answered)")
-        print("\nCURRENT SWEEP — codes whose 16-bit fields look like currents (mA):")
+        print("\nCURRENT probe — targeted codes decoded as 16-bit fields (mA):")
         sweep = dump.get("current_sweep") or {}
         if not sweep:
-            print("  (none found in the swept range)")
+            print("  (no candidate answered)")
         for code, fields in sorted(sweep.items()):
-            shown = ", ".join(f"[{i}]={f}" for i, f in enumerate(fields) if f)
+            shown = ", ".join(f"[{i}]={f}" for i, f in enumerate(fields) if f) or "(all zero)"
             print(f"  code {code}: {shown}")
         print("\nLEVEL sources — full 3-word block per loop (idx: [w0, w1, w2]):")
         for i, words in sorted((dump.get("level_sources_full") or {}).items()):
             print(f"  [{i}] {words}")
-        print("\nLEVEL config band (base code: per-loop values [L0, L1, L2, L3]):")
-        band = dump.get("level_cfg_band") or {}
-        if not band:
-            print("  (nothing distinctive in the band)")
-        for base, vals in sorted(band.items()):
-            print(f"  code {base}: {vals}")
         return 0
 
     order = (

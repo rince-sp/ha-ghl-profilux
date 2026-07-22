@@ -8,23 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Wide current sweep** in the diagnostic dump (`scraper.py --debug`). The
+- **Targeted current probe** in the diagnostic dump (`scraper.py --debug`). The
   powerbar current array (code `10128`) only carries the first 16 sockets, so
   higher switching channels (e.g. an Orphek light on channel 17, a virtual
   channel on 18) show a current in the GHL app that this array does not hold.
-  The sweep scans a broad code range plus the `+1000` mega-block banks and
-  decodes each value as 16-bit little-endian mA fields, so a single run
-  pinpoints whichever register carries those channels' current. The dump also
-  probes a possible higher socket bank via the mega-block state offset.
-- **Level-loop config probe** in the diagnostic dump. Each level loop's source
-  block is three words, not one, so the dump now reads the full block per loop
-  (the two assigned float sensors live there) and sweeps a nearby config band to
-  locate the operating-mode ("Betriebsmodus") register — a loop uses one or two
-  float sensors depending on that mode.
+  The probe reads the neighbouring array and the `+1000` / `+2000` mega-block
+  banks and decodes each as 16-bit little-endian mA fields to locate whichever
+  register carries those channels' current, and probes a possible higher socket
+  bank via the mega-block state offset.
+- **Full level-loop source block** in the diagnostic dump. Each level loop's
+  source block is three words, not one — the two assigned float sensors ("Sensor
+  1" / "Sensor 2" in the app) live there, and whether a loop uses one or two of
+  them depends on its operating mode ("Betriebsmodus").
 
 ### Changed
 - Refactored the per-socket current decoder onto a shared 16-bit little-endian
   field splitter (`_decode_16bit_fields`); no change to the decoded values.
+- The diagnostic dump now uses small, targeted probes instead of a broad code
+  sweep, which the controller answers reliably (a wide sweep made it drop
+  frames and blanked the essential reads).
 
 ## [1.2.0] - 2026-07-22
 
