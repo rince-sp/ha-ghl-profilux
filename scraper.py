@@ -74,7 +74,7 @@ def main() -> int:
             return 1
         print(f"counts (reported): {dump['counts']}")
         print(f"SP_ALL_STATE  raw: {dump['all_state_raw']!r}")
-        print(f"SP_ALL_CURRENT raw: {dump['all_current_raw']!r}")
+        print(f"socket currents (A): {dump['socket_currents']}")
         print("\nSENSOR slots (idx: type / raw value / name):")
         for s in dump["sensors"]:
             if s["type"] is None and s["value_raw"] is None and s["name"] is None:
@@ -138,7 +138,8 @@ def main() -> int:
     for p in data["sockets"]:
         name = p["name"] or f"Socket {p['index'] + 1}"
         state = "??" if p["is_on"] is None else ("ON" if p["is_on"] else "off")
-        print(f"  [{p['index']}] {name:<24} {state}")
+        amps = "" if p.get("current") is None else f"  {p['current']:.2f} A"
+        print(f"  [{p['index']}] {name:<24} {state}{amps}")
 
     print("\nLevel control loops:")
     if not data.get("levels"):

@@ -66,6 +66,11 @@ class ProfiluxSocket(ProfiluxEntity, BinarySensorEntity):
         return None if data is None else data.get("is_on")
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._socket_data or {}
+        return {"current_a": data.get("current")}
+
+    @property
     def available(self) -> bool:
         return super().available and self._socket_data is not None
 

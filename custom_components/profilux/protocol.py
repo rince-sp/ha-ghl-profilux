@@ -46,8 +46,8 @@ CODE_SENSOR_VALUE = 10000      # + block(i, 8, 8); raw integer, needs scaling
 CODE_SENSOR_NAME = 18000       # + block(i, 32, 1); text
 
 CODE_SOCKET_STATE = 10100      # + block(i, 24, 1); 0 = off, else on
-CODE_SOCKET_ALL_STATE = 10126  # single read: bitmask of every socket's state
-CODE_SOCKET_ALL_CURRENT = 10127  # digital powerbar: aggregate current
+CODE_SOCKET_ALL_STATE = 10126  # single read: bitmask of the first 16 socket states
+CODE_SOCKET_CURRENT_ARRAY = 10128  # digital powerbar: per-socket current, 16-bit LE mA fields
 CODE_SOCKET_NAME = 18064       # + block(i, 64, 1); text
 CODE_SOCKET_FUNCTION = 756     # + block(i, 24, 1); config bitfield (0 = unused)
 
@@ -153,6 +153,26 @@ def _block_offset(index: int, block_count: int, block_size: int) -> int:
 
 def _sensor_offset(index: int) -> int:
     return _block_offset(index, 8, 24)
+
+
+def _decode_socket_currents(raw: int | None) -> dict[int, float]:
+    """Decode the powerbar current register into {socket_index: amps}.
+
+    The value packs one 16-bit little-endian field per socket, in milliamps.
+    High-order zero fields are dropped by the integer, so trailing sockets that
+    draw no current simply won't appear.
+    """
+    if not raw:
+        return {}
+    nibbles = [(raw >> (4 * i)) & 0xF for i in range((raw.bit_length() + 3) // 4)]
+    while len(nibbles) % 4:
+        nibbles.append(0)
+    currents: dict[int, float] = {}
+    for field in range(len(nibbles) // 4):
+        k = field * 4
+        milliamps = nibbles[k] | (nibbles[k + 1] << 4) | (nibbles[k + 2] << 8) | (nibbles[k + 3] << 12)
+        currents[field] = round(milliamps / 1000.0, 2)
+    return currents
 
 
 # =========================================================================
@@ -572,16 +592,31 @@ class Controller:
         states = self._t.get_many_int(list(state_code.values()), signed=False)
         name_code = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in idxs}
         names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
+        currents = _decode_socket_currents(self._get_int(CODE_SOCKET_CURRENT_ARRAY, signed=False))
 
-        present = [i for i in idxs if state_code[i] in states or names.get(name_code[i])]
+        # Physical sockets answer the state register; digital-powerbar channels
+        # (17/18…) don't, but their draw shows up in the current array. So a
+        # socket is real if it has a state, a name, or a non-zero current.
+        present = [
+            i for i in idxs
+            if state_code[i] in states or names.get(name_code[i]) or currents.get(i)
+        ]
         result: list[dict[str, Any]] = []
         for i in present:
             state = states.get(state_code[i])
+            amps = currents.get(i)
+            if state is not None:
+                is_on: bool | None = state != 0
+            elif amps is not None:
+                is_on = amps > 0  # powerbar channel: on when drawing current
+            else:
+                is_on = None
             result.append(
                 {
                     "index": i,
                     "name": names.get(name_code[i]),
-                    "is_on": None if state is None else state != 0,
+                    "is_on": is_on,
+                    "current": amps,
                 }
             )
         return result
@@ -693,7 +728,9 @@ def diagnostic(
         l_names = transport.get_many_text(list(l_name_c.values()))
         probes = transport.get_many_int(probe_codes, signed=False)
         all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
-        all_current = ctrl._get_int(CODE_SOCKET_ALL_CURRENT, signed=False)
+        socket_currents = _decode_socket_currents(
+            ctrl._get_int(CODE_SOCKET_CURRENT_ARRAY, signed=False)
+        )
         counts = {
             "sensors": ctrl._get_int(CODE_GET_SENSOR_COUNT, signed=False),
             "sockets": ctrl._get_int(CODE_GET_SWITCH_COUNT, signed=False),
@@ -714,6 +751,7 @@ def diagnostic(
             "index": i,
             "state": k_states.get(k_state_c[i]),
             "all_bit": None if all_state is None else (all_state >> i) & 1,
+            "current": socket_currents.get(i),
             "name": k_names.get(k_name_c[i]),
         }
         for i in wide
@@ -730,7 +768,7 @@ def diagnostic(
     return {
         "counts": counts,
         "all_state_raw": all_state,
-        "all_current_raw": all_current,
+        "socket_currents": socket_currents,
         "probe_codes": {c: v for c, v in probes.items()},
         "sensors": sensors,
         "sockets": sockets,

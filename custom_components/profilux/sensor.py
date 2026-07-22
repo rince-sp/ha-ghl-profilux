@@ -9,6 +9,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfElectricCurrent
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -38,10 +39,17 @@ async def async_setup_entry(
     for sensor in sensors:
         type_counts[sensor["label"]] = type_counts.get(sensor["label"], 0) + 1
 
-    async_add_entities(
+    entities: list[SensorEntity] = [
         ProfiluxSensor(coordinator, sensor["index"], _unique_suffix(sensor, type_counts))
         for sensor in sensors
-    )
+    ]
+    # One current sensor per socket that reports a draw (digital powerbar).
+    entities += [
+        ProfiluxSocketCurrent(coordinator, socket["index"])
+        for socket in (coordinator.data or {}).get("sockets", [])
+        if socket.get("current") is not None
+    ]
+    async_add_entities(entities)
 
 
 class ProfiluxSensor(ProfiluxEntity, SensorEntity):
@@ -81,3 +89,36 @@ class ProfiluxSensor(ProfiluxEntity, SensorEntity):
     @property
     def available(self) -> bool:
         return super().available and self._sensor_data is not None
+
+
+class ProfiluxSocketCurrent(ProfiluxEntity, SensorEntity):
+    """Current drawn by one socket (digital powerbar), in amps."""
+
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: ProfiluxCoordinator, index: int) -> None:
+        super().__init__(coordinator)
+        self._index = index
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_socket_{index}_current"
+        data = self._socket_data or {}
+        name = data.get("name") or f"Socket {index + 1}"
+        self._attr_name = f"{name} current"
+
+    @property
+    def _socket_data(self) -> dict[str, Any] | None:
+        for socket in (self.coordinator.data or {}).get("sockets", []):
+            if socket["index"] == self._index:
+                return socket
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        data = self._socket_data
+        return None if data is None else data.get("current")
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._socket_data is not None
