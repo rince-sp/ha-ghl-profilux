@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decodes each value as 16-bit little-endian mA fields, so a single run
   pinpoints whichever register carries those channels' current. The dump also
   probes a possible higher socket bank via the mega-block state offset.
+- **Level-loop config probe** in the diagnostic dump. Each level loop's source
+  block is three words, not one, so the dump now reads the full block per loop
+  (the two assigned float sensors live there) and sweeps a nearby config band to
+  locate the operating-mode ("Betriebsmodus") register — a loop uses one or two
+  float sensors depending on that mode.
 
 ### Changed
 - Refactored the per-socket current decoder onto a shared 16-bit little-endian

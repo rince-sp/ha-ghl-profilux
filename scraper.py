@@ -109,6 +109,15 @@ def main() -> int:
         for code, fields in sorted(sweep.items()):
             shown = ", ".join(f"[{i}]={f}" for i, f in enumerate(fields) if f)
             print(f"  code {code}: {shown}")
+        print("\nLEVEL sources — full 3-word block per loop (idx: [w0, w1, w2]):")
+        for i, words in sorted((dump.get("level_sources_full") or {}).items()):
+            print(f"  [{i}] {words}")
+        print("\nLEVEL config band (base code: per-loop values [L0, L1, L2, L3]):")
+        band = dump.get("level_cfg_band") or {}
+        if not band:
+            print("  (nothing distinctive in the band)")
+        for base, vals in sorted(band.items()):
+            print(f"  code {base}: {vals}")
         return 0
 
     order = (

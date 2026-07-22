@@ -742,6 +742,25 @@ def diagnostic(
         # mega-block, in case a second socket bank lives there.
         hi_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) + MEGA_BLOCK_SIZE for i in range(16, 24)}
 
+        # Level-loop config. Each loop's source block is *three* words (not one),
+        # so read all three per loop — the two assigned float sensors ("Sensor 1"
+        # / "Sensor 2" in the app) live in this block, and whether a loop uses one
+        # or two of them depends on its operating mode ("Betriebsmodus"). Also
+        # sweep a nearby config band per loop to locate the operating-mode
+        # register (an inactive loop should read 0 where active ones don't).
+        NLV = 4
+        l_srcfull_c = {
+            (i, w): CODE_LEVEL_SOURCES + _block_offset(i, 3, 3) + w
+            for i in range(NLV)
+            for w in range(3)
+        }
+        cfg_band = range(900, 961)
+        l_cfg_c = {
+            (base, i): base + _block_offset(i, 3, 1)
+            for base in cfg_band
+            for i in range(NLV)
+        }
+
         s_types = transport.get_many_int(list(s_type_c.values()), signed=False)
         s_vals = transport.get_many_int(list(s_val_c.values()))
         s_names = transport.get_many_text(list(s_name_c.values()))
@@ -756,6 +775,8 @@ def diagnostic(
         probes = transport.get_many_int(probe_codes, signed=False)
         sweep_raw = transport.get_many_int(sweep_codes, signed=False)
         hi_states = transport.get_many_int(list(hi_state_c.values()), signed=False)
+        l_srcfull = transport.get_many_int(list(l_srcfull_c.values()), signed=False)
+        l_cfg = transport.get_many_int(list(l_cfg_c.values()), signed=False)
         all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
         socket_currents = _decode_socket_currents(
             ctrl._get_int(CODE_SOCKET_CURRENT_ARRAY, signed=False)
@@ -805,6 +826,20 @@ def diagnostic(
             current_sweep[code] = fields
     hi_bank = {i: hi_states.get(hi_state_c[i]) for i in range(16, 24) if hi_states.get(hi_state_c[i]) is not None}
 
+    # Full 3-word source block per level loop.
+    level_sources_full = {
+        i: [l_srcfull.get(l_srcfull_c[(i, w)]) for w in range(3)] for i in range(NLV)
+    }
+    # Config-band candidates: bases whose per-loop values look like small
+    # ids/modes (0-255) and are not identical across every loop — the operating
+    # mode should read 0 on an inactive loop and non-zero on active ones.
+    level_cfg_band = {}
+    for base in cfg_band:
+        vals = [l_cfg.get(l_cfg_c[(base, i)]) for i in range(NLV)]
+        present = [v for v in vals if v is not None]
+        if present and all(v <= 255 for v in present) and len(set(present)) > 1:
+            level_cfg_band[base] = vals
+
     return {
         "counts": counts,
         "all_state_raw": all_state,
@@ -814,6 +849,8 @@ def diagnostic(
         "probe_codes": {c: v for c, v in probes.items()},
         "current_sweep": current_sweep,
         "hi_bank_state": hi_bank,
+        "level_sources_full": level_sources_full,
+        "level_cfg_band": level_cfg_band,
         "sensors": sensors,
         "sockets": sockets,
         "levels": levels,
