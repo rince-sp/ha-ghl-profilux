@@ -19,12 +19,22 @@ selectable when you add the integration.
 - A controller **alarm** `binary_sensor` and a proper HA **device** (model +
   firmware).
 
-### Read-only first phase
+### Socket control (opt-in)
 
-This phase is intentionally **read-only**. Power sockets appear as
-`binary_sensor` entities (status only) so the integration can never accidentally
-switch live aquarium equipment. Turning sockets into controllable `switch`
-entities is a deliberate later phase.
+By default the integration is **read-only** — sockets appear as `binary_sensor`
+entities (status only), so it can never accidentally switch live equipment.
+
+To control sockets, enable it explicitly: **Settings → Devices & Services →
+ProfiLux → Configure → "Enable socket control"**. That adds an on/off `switch`
+per socket. Turning a switch on/off writes the socket's **Function** to "always
+on" / "always off" on the controller — the same persistent override the GHL app
+offers (it survives reboots, unlike a Maintenance program which reverts after a
+timeout). Each socket's automatic Function is remembered so control can be handed
+back to the controller.
+
+> ⚠️ A switch **overrides the controller's automatic control** of whatever is
+> plugged in. Only enable this if you understand that forcing, say, a heater or
+> return pump on/off bypasses its normal regulation.
 
 ## How it talks to the controller
 

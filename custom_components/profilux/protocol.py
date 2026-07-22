@@ -49,7 +49,29 @@ CODE_SOCKET_STATE = 10100      # + block(i, 24, 1); 0 = off, else on
 CODE_SOCKET_ALL_STATE = 10126  # single read: bitmask of the first 16 socket states
 CODE_SOCKET_CURRENT_ARRAY = 10128  # digital powerbar: per-socket current, 16-bit LE mA fields
 CODE_SOCKET_NAME = 18064       # + block(i, 64, 1); text
-CODE_SOCKET_FUNCTION = 756     # + block(i, 24, 1); config bitfield (0 = unused)
+# Socket "Function" — the control-source register (confirmed from the backup:
+# SWITCHPLUG1_FUNCTION, 779 + block(i, 16, 1)). Setting it to the "always on" /
+# "always off" values is the *permanent* manual override (unlike Maintenance,
+# which reverts after a timeout); the two magic values still need capturing from
+# a controller. Remembering the prior value is how automatic control is restored.
+CODE_SOCKET_FUNCTION = 779     # + block(i, 16, 1)
+SOCKET_FUNCTION_BLOCK = 16
+# "Function" values for the two permanent manual modes (confirmed on a ProfiLux 4
+# — universal across sockets, since these modes carry no sensor/timer binding):
+SOCKET_FUNCTION_ALWAYS_ON = 59392    # 0xE800 — "Immer an"
+SOCKET_FUNCTION_ALWAYS_OFF = 61440   # 0xF000 — "Immer aus"
+
+# Manual socket override via "Maintenance" (Wartung) — the GHL-documented way to
+# force sockets on/off. A maintenance *program* p (mega-block +1000*p) carries a
+# select mask (which sockets it forces), a state mask (their forced on/off), and
+# a timeout in minutes after which the controller reverts to automatic. These
+# are the write targets being validated for socket control in a feature branch;
+# the runtime "activate program" command still has to be confirmed on-device.
+CODE_MAINT_SPSELMASK_1_16 = 218
+CODE_MAINT_SPSELMASK_17_32 = 219
+CODE_MAINT_SPSTATEMASK_1_16 = 222
+CODE_MAINT_SPSTATEMASK_17_32 = 223
+CODE_MAINT_TIMEOUT = 244
 
 # Level ("Niveau") control loops
 CODE_LEVEL_STATE = 10070       # + block(i, 3, 1); packed: alarm/fill/drain/water
@@ -227,6 +249,10 @@ class Transport:
     def get_text(self, code: int) -> str | None:
         raise NotImplementedError
 
+    def set_int(self, code: int, value: int, nbytes: int = 2, save: bool = False) -> bool:
+        """Write ``value`` (``nbytes`` wide) to ``code``. Returns True on ack."""
+        raise NotImplementedError
+
     def get_many_int(self, codes: list[int], signed: bool = True) -> dict[int, int]:
         out: dict[int, int] = {}
         for code in codes:
@@ -299,6 +325,20 @@ class HttpTransport(Transport):
         text = data.strip()
         return text or None
 
+    def set_int(self, code: int, value: int, nbytes: int = 2, save: bool = False) -> bool:
+        url = f"{self._base}?dir=set&code={code}&data={value}"
+        req = urllib.request.Request(url, headers=self._headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                body = resp.read().decode("latin-1", "ignore").strip()
+        except urllib.error.HTTPError as err:
+            if err.code in (401, 403):
+                raise ProfiluxError("access denied (check username/password)") from err
+            raise ProfiluxError(f"HTTP {err.code} writing code {code}") from err
+        except (urllib.error.URLError, OSError) as err:
+            raise ProfiluxError(f"cannot reach {self._base}: {err}") from err
+        return "NACK" not in body and "Access Denied" not in body
+
 
 # --- WebSocket / raw SWMBus framing (ProfiLux mini) ----------------------
 SOH = 0x01
@@ -318,19 +358,39 @@ def _checksum(data: list[int], length: int) -> int:
     return total if total >= 32 else total + 32
 
 
-def _encode_code(code: int) -> list[int]:
+def _encode_code(code: int, offset: int = CODE_OFFSET_SAVE) -> list[int]:
     nibbles: list[int] = []
     while True:
-        nibbles.append((code & 0xF) | CODE_OFFSET_SAVE)
+        nibbles.append((code & 0xF) | offset)
         code >>= 4
         if code == 0:
             break
     return nibbles
 
 
+def _encode_data(value: int, nbytes: int) -> list[int]:
+    """Little-endian data nibbles for a SET frame (``nbytes`` bytes wide)."""
+    return [((value >> (4 * i)) & 0xF) | DATA_OFFSET for i in range(nbytes * 2)]
+
+
 def _make_enquiry(code: int) -> bytes:
     header = [SOH, SLAVE_ADDR, MASTER_ADDR]
     frame = header + [_checksum(header, 3), STX] + _encode_code(code) + [ENQ, ETX]
+    frame += [_checksum(frame, len(frame)), EOT]
+    return bytes(frame)
+
+
+def _make_set(code: int, value: int, nbytes: int, save: bool = False) -> bytes:
+    """Build a SET frame writing ``value`` (``nbytes`` wide) to ``code``.
+
+    ``save`` picks the code offset: NOSAVE (runtime only) by default, SAVE to
+    persist to the controller's EEPROM. The frame carries the code nibbles then
+    the data nibbles (no ENQ), which is what distinguishes a write from a read.
+    """
+    offset = CODE_OFFSET_SAVE if save else CODE_OFFSET_NOSAVE
+    header = [SOH, SLAVE_ADDR, MASTER_ADDR]
+    frame = header + [_checksum(header, 3), STX]
+    frame += _encode_code(code, offset) + _encode_data(value, nbytes) + [ETX]
     frame += [_checksum(frame, len(frame)), EOT]
     return bytes(frame)
 
@@ -464,6 +524,30 @@ class WebSocketTransport(Transport):
         if nibbles is None:
             return None
         return _nibbles_to_text(nibbles) or None
+
+    def set_int(self, code: int, value: int, nbytes: int = 2, save: bool = False) -> bool:
+        try:
+            self._ws.send_binary(_make_set(code, value, nbytes, save=save))
+        except Exception as err:  # noqa: BLE001
+            raise ProfiluxError(f"send failed writing code {code}: {err}") from err
+        # This firmware does not echo/ack writes, so don't block waiting for a
+        # reply that never comes — just give a brief window to absorb any stray
+        # frame (so it can't desync the next read), then report the send. The
+        # caller confirms the effect by reading the value back.
+        self._ws.settimeout(0.4)
+        try:
+            reply = self._ws.recv()
+            if isinstance(reply, str):
+                reply = reply.encode("latin-1", "ignore")
+            parsed = _parse_response(reply)
+            if parsed and parsed[0] == code:
+                return True
+        except Exception as err:  # noqa: BLE001
+            if not _is_timeout(err):
+                raise ProfiluxError(f"recv failed writing code {code}: {err}") from err
+        finally:
+            self._ws.settimeout(self._read_timeout)
+        return True
 
     # -- Batched reads ----------------------------------------------------
     # The controller drops the odd reply under back-to-back requests and never
@@ -638,6 +722,8 @@ class Controller:
         states = self._t.get_many_int(list(state_code.values()), signed=False)
         name_code = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in idxs}
         names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
+        func_code = {i: self._socket_function_code(i) for i in idxs}
+        functions = self._t.get_many_int(list(func_code.values()), signed=False)
         currents = self.socket_currents()
 
         # Physical sockets answer the state register; digital-powerbar channels
@@ -657,9 +743,20 @@ class Controller:
                 is_on = amps > 0  # powerbar channel: on when drawing current
             else:
                 is_on = None
+            func = functions.get(func_code[i])
+            if func == SOCKET_FUNCTION_ALWAYS_ON:
+                mode = "on"
+            elif func == SOCKET_FUNCTION_ALWAYS_OFF:
+                mode = "off"
+            elif func is not None:
+                mode = "auto"
+            else:
+                mode = None
             result.append(
                 {
                     "index": i,
+                    "function": func,
+                    "mode": mode,
                     "name": names.get(name_code[i]),
                     "is_on": is_on,
                     "current": amps,
@@ -779,6 +876,35 @@ class Controller:
             )
         return result
 
+    def write_code(self, code: int, value: int, nbytes: int = 2, save: bool = False) -> bool:
+        """Write a raw code (for socket control / experimentation). Returns ack."""
+        for _ in range(self._retries):
+            if self._t.set_int(code, value, nbytes=nbytes, save=save):
+                return True
+        return False
+
+    def _socket_function_code(self, index: int) -> int:
+        return CODE_SOCKET_FUNCTION + _block_offset(index, SOCKET_FUNCTION_BLOCK, 1)
+
+    def socket_function(self, index: int) -> int | None:
+        return self._get_int(self._socket_function_code(index), signed=False)
+
+    def set_socket_function(self, index: int, value: int) -> bool:
+        """Write a socket's Function and confirm by read-back.
+
+        Manual on/off is done by setting the socket's Function to the "always
+        on" / "always off" value. This is a stored setting, so it must be written
+        with ``save=True``; the controller doesn't echo writes back on this
+        firmware, so success is confirmed by reading the value back rather than
+        by an ack.
+        """
+        code = self._socket_function_code(index)
+        for _ in range(self._retries):
+            self._t.set_int(code, value, nbytes=2, save=True)
+            if self._get_int(code, signed=False) == value:
+                return True
+        return False
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "device": self.device_info(),
@@ -812,6 +938,42 @@ def test_connection(host: str, username: str, password: str, interface: str = IN
             raise ProfiluxError("connected but received no valid response")
 
 
+def read_code(
+    host: str,
+    username: str,
+    password: str,
+    code: int,
+    interface: str = INTERFACE_WEBSOCKET,
+    signed: bool = False,
+) -> int | None:
+    """Read a single code — handy for capturing e.g. a socket's Function value."""
+    with make_transport(interface, host, username, password) as transport:
+        return Controller(transport)._get_int(code, signed=signed)
+
+
+def write_and_verify(
+    host: str,
+    username: str,
+    password: str,
+    code: int,
+    value: int,
+    interface: str = INTERFACE_WEBSOCKET,
+    nbytes: int = 2,
+    save: bool = False,
+    verify_code: int | None = None,
+) -> dict[str, Any]:
+    """Write one code and read a verify code before/after — for confirming the
+    socket-control mechanism on a controller safely and reproducibly.
+    """
+    with make_transport(interface, host, username, password) as transport:
+        ctrl = Controller(transport)
+        vcode = code if verify_code is None else verify_code
+        before = ctrl._get_int(vcode, signed=False)
+        acked = ctrl.write_code(code, value, nbytes=nbytes, save=save)
+        after = ctrl._get_int(vcode, signed=False)
+        return {"acked": acked, "verify_code": vcode, "before": before, "after": after}
+
+
 def diagnostic(
     host: str, username: str, password: str, interface: str = INTERFACE_HTTP
 ) -> dict[str, Any]:
@@ -826,15 +988,12 @@ def diagnostic(
         s_type_c = {i: CODE_SENSOR_TYPE + _sensor_offset(i) for i in range(MAX_SENSORS)}
         s_val_c = {i: CODE_SENSOR_VALUE + _block_offset(i, 8, 8) for i in range(MAX_SENSORS)}
         s_name_c = {i: CODE_SENSOR_NAME + _block_offset(i, 32, 1) for i in range(MAX_SENSORS)}
-        k_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
-        k_func_c = {i: CODE_SOCKET_FUNCTION + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
-        k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in range(MAX_SOCKETS)}
-
         # Scan the real socket range (indices >= 24 wrap into other code blocks)
         # and add level + "unknown code" probes so channels beyond the 16-bit
         # state register can be located.
         wide = range(MAX_SOCKETS)
         k_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in wide}
+        k_func_c = {i: CODE_SOCKET_FUNCTION + _block_offset(i, SOCKET_FUNCTION_BLOCK, 1) for i in wide}
         k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in wide}
         l_state_c = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in range(4)}
         l_input_c = {i: CODE_LEVEL_INPUT_STATE + _block_offset(i, 4, 1) for i in range(4)}

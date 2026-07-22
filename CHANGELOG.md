@@ -5,6 +5,24 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-07-22
+
+### Added
+- **Socket control (opt-in).** Enable it under the integration's *Configure*
+  options to add an on/off **switch** per socket. On/off writes the socket's
+  **Function** to "always on" / "always off" — a persistent override (survives a
+  reboot, unlike a Maintenance program which reverts after a timeout). Each
+  socket's automatic Function is remembered so control can be handed back to the
+  controller. Off by default; a switch overrides the controller's automatic
+  control of whatever is plugged in.
+
+### Changed
+- The protocol gained a write path (`set_int`, `Controller.set_socket_function`),
+  confirmed by read-back since this firmware doesn't acknowledge writes. Writes
+  no longer block waiting for an ack that never arrives.
+- The socket snapshot now includes each socket's Function and derived mode
+  (auto / on / off).
+
 ## [1.5.2] - 2026-07-22
 
 ### Changed
@@ -124,6 +142,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[1.6.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.6.0
 [1.5.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.2
 [1.5.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.1
 [1.5.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.0

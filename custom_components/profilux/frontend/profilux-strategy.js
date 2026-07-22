@@ -48,12 +48,20 @@ class ProfiluxDashboardStrategy {
     const floats = ids.filter(
       (id) => id.startsWith("binary_sensor.") && /_(min|max)_float$/.test(id)
     );
-    const sockets = ids.filter(
+    const socketSensors = ids.filter(
       (id) =>
         id.startsWith("binary_sensor.") &&
         !id.endsWith("_alarm") &&
         !/_(min|max)_float$/.test(id)
     );
+    // Prefer the controllable switch entity (tap-to-toggle) over the read-only
+    // status sensor when socket control is enabled and a switch exists.
+    const switches = ids.filter((id) => id.startsWith("switch."));
+    const sockets = socketSensors.map((bs) => {
+      const stem = bs.replace(/^binary_sensor\./, "");
+      const sw = switches.find((s) => s.replace(/^switch\./, "") === stem);
+      return sw || bs;
+    });
 
     const totalCurrent = ids.find((id) => id.endsWith("_total_current"));
     const socketCurrents = power.filter((id) => !id.includes("total"));
