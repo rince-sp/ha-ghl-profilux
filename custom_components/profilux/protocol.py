@@ -256,6 +256,9 @@ def _parse_response(data: bytes) -> tuple[int, list[int]] | None:
         return None
     if b[1] < 80 or b[2] < 80:
         return None
+    # Header block-check (BCA) guards the addressing bytes.
+    if _checksum(b, 3) != b[3]:
+        return None
     d = 5
     code_offset = b[d] & 0xF0
     if code_offset not in (CODE_OFFSET_SAVE, CODE_OFFSET_NOSAVE):
@@ -268,6 +271,13 @@ def _parse_response(data: bytes) -> tuple[int, list[int]] | None:
     while d < len(b) and (b[d] & 0xF0) == DATA_OFFSET:
         data_nibbles.append(b[d] & 0x0F)
         d += 1
+    # Frame block-check (BCC): the byte right after ETX must equal the checksum
+    # over SOH..ETX. This rejects the corrupted / merged frames the controller
+    # occasionally emits under rapid polling (which produced nonsense sensor
+    # types and slot counts); a rejected frame is simply retried.
+    etx = next((j for j in range(d, len(b)) if b[j] == ETX), None)
+    if etx is None or etx + 1 >= len(b) or _checksum(b, etx + 1) != b[etx + 1]:
+        return None
     code = sum(n << (4 * i) for i, n in enumerate(code_nibbles))
     return code, data_nibbles
 
