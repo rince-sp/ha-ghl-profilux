@@ -591,6 +591,26 @@ class Controller:
             )
         return result
 
+    def socket_currents(self) -> dict[int, float]:
+        """Per-socket current in amps, across all powerbar banks.
+
+        The current array holds only 16 sockets; higher channels live in the
+        next bank at the ``+1000`` mega-block offset (socket ``i`` → bank
+        ``i // 16``, field ``i % 16``). Bank 0 gave e.g. the UV lamp at field
+        15; bank 1 (code 11128) carries channel 17/18 (an Orphek light, a pump)
+        whose draw the app shows but the first bank never held.
+        """
+        currents: dict[int, float] = {}
+        banks = (MAX_SOCKETS + 15) // 16
+        for bank in range(banks):
+            raw = self._get_int(CODE_SOCKET_CURRENT_ARRAY + bank * MEGA_BLOCK_SIZE, signed=False)
+            # _decode only yields fields actually present in the array, so an
+            # absent higher socket stays absent (None current) while a present
+            # socket drawing nothing correctly reads 0.0 A.
+            for field, amps in _decode_socket_currents(raw).items():
+                currents[bank * 16 + field] = amps
+        return currents
+
     def sockets(self, count: int) -> list[dict[str, Any]]:
         # A socket is real if its state register answers (physical sockets) or
         # it has a name (named virtual/expansion outputs). The count register is
@@ -600,7 +620,7 @@ class Controller:
         states = self._t.get_many_int(list(state_code.values()), signed=False)
         name_code = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in idxs}
         names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
-        currents = _decode_socket_currents(self._get_int(CODE_SOCKET_CURRENT_ARRAY, signed=False))
+        currents = self.socket_currents()
 
         # Physical sockets answer the state register; digital-powerbar channels
         # (17/18…) don't, but their draw shows up in the current array. So a
@@ -767,9 +787,7 @@ def diagnostic(
         digital_input_count = ctrl._get_int(CODE_GET_DIGITAL_INPUT_COUNT, signed=False)
         probes = transport.get_many_int(probe_codes, signed=False)
         all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
-        socket_currents = _decode_socket_currents(
-            ctrl._get_int(CODE_SOCKET_CURRENT_ARRAY, signed=False)
-        )
+        socket_currents = ctrl.socket_currents()
         counts = {
             "sensors": ctrl._get_int(CODE_GET_SENSOR_COUNT, signed=False),
             "sockets": ctrl._get_int(CODE_GET_SWITCH_COUNT, signed=False),

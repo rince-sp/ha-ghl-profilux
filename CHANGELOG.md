@@ -5,28 +5,29 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-07-22
+
+### Fixed
+- **Current for switching channels beyond the first 16.** The powerbar current
+  array (code `10128`) only carries sockets 0–15, so higher channels — an Orphek
+  light on channel 17, a pump on channel 18 — drew current the GHL app showed
+  but Home Assistant reported as "unknown". Their current lives in the next
+  powerbar bank at the `+1000` mega-block offset (code `11128`); the integration
+  now reads every bank (socket `i` → bank `i // 16`, field `i % 16`), so those
+  channels report their real current and switch on/off correctly.
 
 ### Added
-- **Targeted current probe** in the diagnostic dump (`scraper.py --debug`). The
-  powerbar current array (code `10128`) only carries the first 16 sockets, so
-  higher switching channels (e.g. an Orphek light on channel 17, a virtual
-  channel on 18) show a current in the GHL app that this array does not hold.
-  The probe reads the neighbouring array and the `+1000` / `+2000` mega-block
-  banks and decodes each as 16-bit little-endian mA fields to locate whichever
-  register carries those channels' current, and probes a possible higher socket
-  bank via the mega-block state offset.
-- **Full level-loop source block** in the diagnostic dump. Each level loop's
-  source block is three words, not one — the two assigned float sensors ("Sensor
-  1" / "Sensor 2" in the app) live there, and whether a loop uses one or two of
-  them depends on its operating mode ("Betriebsmodus").
+- **Targeted current/level probes** in the diagnostic dump (`scraper.py
+  --debug`): the neighbouring/mega-block current banks (decoded as 16-bit
+  little-endian mA fields), a possible higher socket state bank, and each level
+  loop's full three-word source block.
 
 ### Changed
 - Refactored the per-socket current decoder onto a shared 16-bit little-endian
   field splitter (`_decode_16bit_fields`); no change to the decoded values.
-- The diagnostic dump now uses small, targeted probes instead of a broad code
-  sweep, which the controller answers reliably (a wide sweep made it drop
-  frames and blanked the essential reads).
+- The diagnostic dump uses small, targeted probes instead of a broad code sweep,
+  which the controller answers reliably (a wide sweep made it drop frames and
+  blanked the essential reads).
 
 ## [1.2.0] - 2026-07-22
 
@@ -77,7 +78,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
-[Unreleased]: https://github.com/rince-sp/ha-ghl-profilux/compare/v1.2.0...HEAD
+[1.3.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.3.0
 [1.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.2.0
 [1.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.1.0
 [1.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.0.0
