@@ -18,5 +18,16 @@
     "abort": {
       "already_configured": "This device is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ProfiLux options",
+        "description": "Socket control writes to the controller and can override the automatic control of live equipment. Leave it off unless you want switches.",
+        "data": {
+          "control_sockets": "Enable socket control (adds an on/off switch per socket)"
+        }
+      }
+    }
   }
 }

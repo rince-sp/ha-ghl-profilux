@@ -7,8 +7,14 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import callback
 
-from .const import CONF_INTERFACE, DOMAIN
+from .const import (
+    CONF_CONTROL_SOCKETS,
+    CONF_INTERFACE,
+    DEFAULT_CONTROL_SOCKETS,
+    DOMAIN,
+)
 from .protocol import INTERFACE_HTTP, INTERFACES, ProfiluxError, test_connection
 
 STEP_USER_SCHEMA = vol.Schema(
@@ -25,6 +31,13 @@ class ProfiluxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for ProfiLux."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> "ProfiluxOptionsFlow":
+        return ProfiluxOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -51,4 +64,24 @@ class ProfiluxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=STEP_USER_SCHEMA,
             errors=errors,
+        )
+
+
+class ProfiluxOptionsFlow(config_entries.OptionsFlow):
+    """Options: opt in to socket control (writes to the controller)."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self.config_entry.options.get(
+            CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_CONTROL_SOCKETS, default=current): bool}
+            ),
         )

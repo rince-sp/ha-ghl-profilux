@@ -530,20 +530,24 @@ class WebSocketTransport(Transport):
             self._ws.send_binary(_make_set(code, value, nbytes, save=save))
         except Exception as err:  # noqa: BLE001
             raise ProfiluxError(f"send failed writing code {code}: {err}") from err
-        # The controller echoes the written code back as an acknowledgement.
-        for _ in range(6):
-            try:
-                reply = self._ws.recv()
-            except Exception as err:  # noqa: BLE001
-                if _is_timeout(err):
-                    return False
-                raise ProfiluxError(f"recv failed writing code {code}: {err}") from err
+        # This firmware does not echo/ack writes, so don't block waiting for a
+        # reply that never comes — just give a brief window to absorb any stray
+        # frame (so it can't desync the next read), then report the send. The
+        # caller confirms the effect by reading the value back.
+        self._ws.settimeout(0.4)
+        try:
+            reply = self._ws.recv()
             if isinstance(reply, str):
                 reply = reply.encode("latin-1", "ignore")
             parsed = _parse_response(reply)
             if parsed and parsed[0] == code:
                 return True
-        return False
+        except Exception as err:  # noqa: BLE001
+            if not _is_timeout(err):
+                raise ProfiluxError(f"recv failed writing code {code}: {err}") from err
+        finally:
+            self._ws.settimeout(self._read_timeout)
+        return True
 
     # -- Batched reads ----------------------------------------------------
     # The controller drops the odd reply under back-to-back requests and never
@@ -718,6 +722,8 @@ class Controller:
         states = self._t.get_many_int(list(state_code.values()), signed=False)
         name_code = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in idxs}
         names = self._t.get_many_text(list(name_code.values())) if self._read_names else {}
+        func_code = {i: self._socket_function_code(i) for i in idxs}
+        functions = self._t.get_many_int(list(func_code.values()), signed=False)
         currents = self.socket_currents()
 
         # Physical sockets answer the state register; digital-powerbar channels
@@ -737,9 +743,20 @@ class Controller:
                 is_on = amps > 0  # powerbar channel: on when drawing current
             else:
                 is_on = None
+            func = functions.get(func_code[i])
+            if func == SOCKET_FUNCTION_ALWAYS_ON:
+                mode = "on"
+            elif func == SOCKET_FUNCTION_ALWAYS_OFF:
+                mode = "off"
+            elif func is not None:
+                mode = "auto"
+            else:
+                mode = None
             result.append(
                 {
                     "index": i,
+                    "function": func,
+                    "mode": mode,
                     "name": names.get(name_code[i]),
                     "is_on": is_on,
                     "current": amps,
@@ -863,6 +880,28 @@ class Controller:
         """Write a raw code (for socket control / experimentation). Returns ack."""
         for _ in range(self._retries):
             if self._t.set_int(code, value, nbytes=nbytes, save=save):
+                return True
+        return False
+
+    def _socket_function_code(self, index: int) -> int:
+        return CODE_SOCKET_FUNCTION + _block_offset(index, SOCKET_FUNCTION_BLOCK, 1)
+
+    def socket_function(self, index: int) -> int | None:
+        return self._get_int(self._socket_function_code(index), signed=False)
+
+    def set_socket_function(self, index: int, value: int) -> bool:
+        """Write a socket's Function and confirm by read-back.
+
+        Manual on/off is done by setting the socket's Function to the "always
+        on" / "always off" value. This is a stored setting, so it must be written
+        with ``save=True``; the controller doesn't echo writes back on this
+        firmware, so success is confirmed by reading the value back rather than
+        by an ack.
+        """
+        code = self._socket_function_code(index)
+        for _ in range(self._retries):
+            self._t.set_int(code, value, nbytes=2, save=True)
+            if self._get_int(code, signed=False) == value:
                 return True
         return False
 
