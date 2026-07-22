@@ -73,7 +73,20 @@ def main() -> int:
     parser.add_argument("--save", action="store_true", help="Persist the write to EEPROM (default: runtime only)")
     parser.add_argument("--verify", type=int, default=None, help="Code to read back before/after the write")
     parser.add_argument("--yes", action="store_true", help="Skip the write confirmation prompt")
+    parser.add_argument("--read", type=int, default=None, metavar="CODE", help="Read a single code and print it")
     args = parser.parse_args()
+
+    if args.read is not None:
+        from protocol import read_code  # noqa: E402, PLC0415
+
+        iface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface
+        try:
+            val = read_code(args.host, args.username, args.password, args.read, interface=iface)
+        except ProfiluxError as err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 1
+        print(f"code {args.read}: {val}" + (f"  (0x{val:X}, bin {val:016b})" if isinstance(val, int) else ""))
+        return 0
 
     if args.write:
         from protocol import write_and_verify  # noqa: E402, PLC0415

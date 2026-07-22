@@ -49,7 +49,13 @@ CODE_SOCKET_STATE = 10100      # + block(i, 24, 1); 0 = off, else on
 CODE_SOCKET_ALL_STATE = 10126  # single read: bitmask of the first 16 socket states
 CODE_SOCKET_CURRENT_ARRAY = 10128  # digital powerbar: per-socket current, 16-bit LE mA fields
 CODE_SOCKET_NAME = 18064       # + block(i, 64, 1); text
-CODE_SOCKET_FUNCTION = 756     # + block(i, 24, 1); config bitfield (0 = unused)
+# Socket "Function" — the control-source register (confirmed from the backup:
+# SWITCHPLUG1_FUNCTION, 779 + block(i, 16, 1)). Setting it to the "always on" /
+# "always off" values is the *permanent* manual override (unlike Maintenance,
+# which reverts after a timeout); the two magic values still need capturing from
+# a controller. Remembering the prior value is how automatic control is restored.
+CODE_SOCKET_FUNCTION = 779     # + block(i, 16, 1)
+SOCKET_FUNCTION_BLOCK = 16
 
 # Manual socket override via "Maintenance" (Wartung) — the GHL-documented way to
 # force sockets on/off. A maintenance *program* p (mega-block +1000*p) carries a
@@ -889,6 +895,19 @@ def test_connection(host: str, username: str, password: str, interface: str = IN
             raise ProfiluxError("connected but received no valid response")
 
 
+def read_code(
+    host: str,
+    username: str,
+    password: str,
+    code: int,
+    interface: str = INTERFACE_WEBSOCKET,
+    signed: bool = False,
+) -> int | None:
+    """Read a single code — handy for capturing e.g. a socket's Function value."""
+    with make_transport(interface, host, username, password) as transport:
+        return Controller(transport)._get_int(code, signed=signed)
+
+
 def write_and_verify(
     host: str,
     username: str,
@@ -926,15 +945,12 @@ def diagnostic(
         s_type_c = {i: CODE_SENSOR_TYPE + _sensor_offset(i) for i in range(MAX_SENSORS)}
         s_val_c = {i: CODE_SENSOR_VALUE + _block_offset(i, 8, 8) for i in range(MAX_SENSORS)}
         s_name_c = {i: CODE_SENSOR_NAME + _block_offset(i, 32, 1) for i in range(MAX_SENSORS)}
-        k_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
-        k_func_c = {i: CODE_SOCKET_FUNCTION + _block_offset(i, 24, 1) for i in range(MAX_SOCKETS)}
-        k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in range(MAX_SOCKETS)}
-
         # Scan the real socket range (indices >= 24 wrap into other code blocks)
         # and add level + "unknown code" probes so channels beyond the 16-bit
         # state register can be located.
         wide = range(MAX_SOCKETS)
         k_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) for i in wide}
+        k_func_c = {i: CODE_SOCKET_FUNCTION + _block_offset(i, SOCKET_FUNCTION_BLOCK, 1) for i in wide}
         k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in wide}
         l_state_c = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in range(4)}
         l_input_c = {i: CODE_LEVEL_INPUT_STATE + _block_offset(i, 4, 1) for i in range(4)}
