@@ -9,3 +9,7 @@ SCAN_INTERVAL = 60
 MANUFACTURER = "GHL"
 
 CONF_INTERFACE = "interface"
+
+# The powerbar reports current (A); power (W) is estimated as current × mains
+# voltage. EU default; adjust if your mains differs.
+MAINS_VOLTAGE = 230

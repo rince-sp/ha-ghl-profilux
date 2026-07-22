@@ -9,13 +9,21 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricCurrent
+from homeassistant.const import UnitOfElectricCurrent, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, MAINS_VOLTAGE
 from .coordinator import ProfiluxCoordinator
 from .entity import ProfiluxEntity
+
+
+def _socket_currents(coordinator: ProfiluxCoordinator) -> list[float]:
+    return [
+        s["current"]
+        for s in (coordinator.data or {}).get("sockets", [])
+        if s.get("current") is not None
+    ]
 
 
 def _unique_suffix(sensor: dict[str, Any], type_counts: dict[str, int]) -> str:
@@ -48,6 +56,15 @@ async def async_setup_entry(
         ProfiluxSocketCurrent(coordinator, socket["index"])
         for socket in (coordinator.data or {}).get("sockets", [])
         if socket.get("current") is not None
+    ]
+    # Aggregate current + estimated power across the powerbar.
+    if _socket_currents(coordinator):
+        entities.append(ProfiluxTotalCurrent(coordinator))
+        entities.append(ProfiluxTotalPower(coordinator))
+    # A status text per level control loop.
+    entities += [
+        ProfiluxLevelStatus(coordinator, level["index"])
+        for level in (coordinator.data or {}).get("levels", [])
     ]
     async_add_entities(entities)
 
@@ -122,3 +139,79 @@ class ProfiluxSocketCurrent(ProfiluxEntity, SensorEntity):
     @property
     def available(self) -> bool:
         return super().available and self._socket_data is not None
+
+
+class ProfiluxTotalCurrent(ProfiluxEntity, SensorEntity):
+    """Total current across all powerbar sockets, in amps."""
+
+    _attr_name = "Total current"
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: ProfiluxCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_total_current"
+
+    @property
+    def native_value(self) -> float | None:
+        currents = _socket_currents(self.coordinator)
+        return round(sum(currents), 2) if currents else None
+
+
+class ProfiluxTotalPower(ProfiluxEntity, SensorEntity):
+    """Estimated total power draw (total current × mains voltage), in watts."""
+
+    _attr_name = "Total power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator: ProfiluxCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_total_power"
+
+    @property
+    def native_value(self) -> float | None:
+        currents = _socket_currents(self.coordinator)
+        return round(sum(currents) * MAINS_VOLTAGE) if currents else None
+
+
+class ProfiluxLevelStatus(ProfiluxEntity, SensorEntity):
+    """Overall status of one level ("Niveau") control loop."""
+
+    _attr_icon = "mdi:water-check"
+
+    def __init__(self, coordinator: ProfiluxCoordinator, index: int) -> None:
+        super().__init__(coordinator)
+        self._index = index
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_level_{index}_status"
+        data = self._level_data or {}
+        name = data.get("name") or f"Level {index + 1}"
+        self._attr_name = f"{name} status"
+
+    @property
+    def _level_data(self) -> dict[str, Any] | None:
+        for level in (self.coordinator.data or {}).get("levels", []):
+            if level["index"] == self._index:
+                return level
+        return None
+
+    @property
+    def native_value(self) -> str | None:
+        data = self._level_data
+        if data is None:
+            return None
+        if data.get("alarm"):
+            return "Alarm"
+        if data.get("fill"):
+            return "Filling"
+        if data.get("drain"):
+            return "Draining"
+        return "OK"
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._level_data is not None

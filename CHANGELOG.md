@@ -5,6 +5,16 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-22
+
+### Added
+- **Power monitoring.** A **total current** (A) and estimated **total power** (W,
+  current × mains voltage) sensor across the powerbar; the strategy dashboard
+  gains a power section with a 24 h history graph.
+- **Level status** sensor per control loop (OK / Filling / Draining / Alarm).
+- Debug dump (`scraper.py --debug`) now includes digital-input states and each
+  level loop's source assignments, to map the individual min/max float sensors.
+
 ## [1.1.0] - 2026-07-22
 
 ### Added
@@ -38,5 +48,6 @@ Initial release.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[1.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.2.0
 [1.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.1.0
 [1.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.0.0

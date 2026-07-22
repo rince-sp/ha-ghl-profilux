@@ -31,10 +31,16 @@ class ProfiluxDashboardStrategy {
     const ids = entities.map((e) => e.entity_id).sort((a, b) => a.localeCompare(b));
     const stateOf = (id) => hass.states[id];
 
+    const isSensor = (id) => id.startsWith("sensor.");
     const gauges = ids.filter(
-      (id) => id.startsWith("sensor.") && !id.endsWith("_current")
+      (id) => isSensor(id) && !/_(current|power|status)$/.test(id)
     );
-    const currents = ids.filter((id) => id.endsWith("_current"));
+    // Power/current: totals first, then per-socket currents.
+    const power = ids
+      .filter((id) => isSensor(id) && /_(current|power)$/.test(id))
+      .sort((a, b) => (b.includes("total") ? 1 : 0) - (a.includes("total") ? 1 : 0));
+    const totalPower = ids.find((id) => id.endsWith("_total_power"));
+    const status = ids.filter((id) => isSensor(id) && id.endsWith("_status"));
     const alarms = ids.filter(
       (id) => id.startsWith("binary_sensor.") && id.endsWith("_alarm")
     );
@@ -71,16 +77,27 @@ class ProfiluxDashboardStrategy {
         cards: [heading("Schaltkanäle", "mdi:power-socket-de"), ...sockets.map(socketCard)],
       });
     }
-    if (currents.length) {
-      sections.push({
-        type: "grid",
-        cards: [heading("Stromaufnahme", "mdi:flash"), ...currents.map((id) => tile(id, 4))],
-      });
+    if (power.length) {
+      const cards = [heading("Leistung & Stromaufnahme", "mdi:flash")];
+      if (totalPower) {
+        cards.push({
+          type: "history-graph",
+          hours_to_show: 24,
+          entities: [{ entity: totalPower }],
+          grid_options: { columns: "full", rows: 4 },
+        });
+      }
+      cards.push(...power.map((id) => tile(id, id.includes("total") ? 6 : 4)));
+      sections.push({ type: "grid", cards });
     }
-    if (alarms.length) {
+    if (status.length || alarms.length) {
       sections.push({
         type: "grid",
-        cards: [heading("Niveau & Alarm", "mdi:water-percent"), ...alarms.map((id) => tile(id, 6))],
+        cards: [
+          heading("Niveau & Alarm", "mdi:water-percent"),
+          ...status.map((id) => tile(id, 6)),
+          ...alarms.map((id) => tile(id, 6)),
+        ],
       });
     }
 

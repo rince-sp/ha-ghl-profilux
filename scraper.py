@@ -85,11 +85,17 @@ def main() -> int:
             if k["state"] is None and k["name"] is None and not k["all_bit"]:
                 continue
             print(f"  [{k['index']:>2}] state={k['state']!s:<5} bit={k['all_bit']!s:<5} name={k['name']!r}")
-        print("\nLEVEL slots (idx: state / input / name):")
+        di = dump.get("digital_inputs_raw")
+        print(f"\nDIGITAL INPUTS raw: {di!r}"
+              + (f"  bits={di:016b}" if isinstance(di, int) else "")
+              + f"  (count {dump.get('digital_input_count')})")
+        print("\nLEVEL slots (idx: state / input / sources / name):")
         for lv in dump["levels"]:
-            if lv["state"] is None and lv["input"] is None and lv["name"] is None:
+            if lv["state"] is None and lv["input"] is None and lv["name"] is None and lv.get("sources") is None:
                 continue
-            print(f"  [{lv['index']:>2}] state={lv['state']!s:<7} input={lv['input']!s:<7} name={lv['name']!r}")
+            src = lv.get("sources")
+            src_txt = "" if src is None else f" src1={src & 0xF} src2={(src >> 4) & 0xF}"
+            print(f"  [{lv['index']:>2}] state={lv['state']!s:<7} input={lv['input']!s:<7} sources={src!s:<6}{src_txt} name={lv['name']!r}")
         print("\nUNKNOWN code probes (10124-10145):")
         for code, val in sorted(dump["probe_codes"].items()):
             print(f"  code {code}: {val}  (bin {val:016b})")

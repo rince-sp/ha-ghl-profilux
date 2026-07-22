@@ -54,8 +54,13 @@ CODE_SOCKET_FUNCTION = 756     # + block(i, 24, 1); config bitfield (0 = unused)
 # Level ("Niveau") control loops
 CODE_LEVEL_STATE = 10070       # + block(i, 3, 1); packed: alarm/fill/drain/water
 CODE_LEVEL_INPUT_STATE = 10074  # + block(i, 4, 1); delayed/previous/undelayed
+CODE_LEVEL_SOURCES = 928       # + block(i, 3, 3); source1 = &0xf, source2 = (>>4)&0xf
 CODE_LEVEL_NAME = 18128        # + block(i, 64, 1); text
 CODE_GET_LEVEL_COUNT = 10503
+
+# Digital inputs (float switches feed the level loops)
+CODE_DIGITAL_INPUTS_STATE = 10091  # bitmask of all digital input states
+CODE_GET_DIGITAL_INPUT_COUNT = 10505
 
 CODE_GET_SENSOR_COUNT = 10500
 CODE_GET_SWITCH_COUNT = 10501
@@ -715,6 +720,7 @@ def diagnostic(
         k_name_c = {i: CODE_SOCKET_NAME + _block_offset(i, 64, 1) for i in wide}
         l_state_c = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in range(4)}
         l_input_c = {i: CODE_LEVEL_INPUT_STATE + _block_offset(i, 4, 1) for i in range(4)}
+        l_source_c = {i: CODE_LEVEL_SOURCES + _block_offset(i, 3, 3) for i in range(4)}
         l_name_c = {i: CODE_LEVEL_NAME + _block_offset(i, 64, 1) for i in range(4)}
         probe_codes = list(range(10124, 10146))  # around SP_ALL_STATE/CURRENT
 
@@ -725,7 +731,10 @@ def diagnostic(
         k_names = transport.get_many_text(list(k_name_c.values()))
         l_states = transport.get_many_int(list(l_state_c.values()), signed=False)
         l_inputs = transport.get_many_int(list(l_input_c.values()), signed=False)
+        l_sources = transport.get_many_int(list(l_source_c.values()), signed=False)
         l_names = transport.get_many_text(list(l_name_c.values()))
+        digital_inputs = ctrl._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
+        digital_input_count = ctrl._get_int(CODE_GET_DIGITAL_INPUT_COUNT, signed=False)
         probes = transport.get_many_int(probe_codes, signed=False)
         all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
         socket_currents = _decode_socket_currents(
@@ -761,6 +770,7 @@ def diagnostic(
             "index": i,
             "state": l_states.get(l_state_c[i]),
             "input": l_inputs.get(l_input_c[i]),
+            "sources": l_sources.get(l_source_c[i]),
             "name": l_names.get(l_name_c[i]),
         }
         for i in range(4)
@@ -769,6 +779,8 @@ def diagnostic(
         "counts": counts,
         "all_state_raw": all_state,
         "socket_currents": socket_currents,
+        "digital_inputs_raw": digital_inputs,
+        "digital_input_count": digital_input_count,
         "probe_codes": {c: v for c, v in probes.items()},
         "sensors": sensors,
         "sockets": sockets,
