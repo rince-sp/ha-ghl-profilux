@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import socket
 import urllib.error
 import urllib.request
 from typing import Any
@@ -248,14 +249,31 @@ def _nibbles_to_text(nibbles: list[int]) -> str:
     return "".join(chars).strip()
 
 
+def _is_timeout(err: Exception) -> bool:
+    """True if the exception is a socket/WebSocket read timeout."""
+    if isinstance(err, socket.timeout):
+        return True
+    return "timed out" in str(err).lower() or type(err).__name__ == "WebSocketTimeoutException"
+
+
 class WebSocketTransport(Transport):
     """ProfiLux mini SWMBus-over-WebSocket interface (``ws://<host>/ws``)."""
 
-    def __init__(self, host: str, username: str, password: str, timeout: int = 10) -> None:
+    def __init__(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        timeout: int = 10,
+        read_timeout: float = 4.0,
+    ) -> None:
         self._url = f"ws://{host}/ws"
         token = base64.b64encode(f"{username}:{password}".encode()).decode()
         self._auth = {"Authorization": f"Basic {token}"}
         self._timeout = timeout
+        # Per-read timeout: an empty/non-existent slot simply gets no reply, so
+        # keep this short — a miss should cost a beat, not the whole poll.
+        self._read_timeout = read_timeout
         self._ws: Any = None
 
     def __enter__(self) -> "WebSocketTransport":
@@ -265,6 +283,7 @@ class WebSocketTransport(Transport):
             self._ws = websocket.create_connection(
                 self._url, header=self._auth, timeout=self._timeout
             )
+            self._ws.settimeout(self._read_timeout)
         except Exception as err:  # noqa: BLE001
             raise ProfiluxError(f"cannot connect to {self._url}: {err}") from err
         return self
@@ -286,6 +305,11 @@ class WebSocketTransport(Transport):
             try:
                 reply = self._ws.recv()
             except Exception as err:  # noqa: BLE001
+                # A timeout means the controller had nothing to say for this
+                # code (e.g. an empty sensor/socket slot). Treat it as "no data"
+                # rather than a fatal error so one gap can't abort the poll.
+                if _is_timeout(err):
+                    return None
                 raise ProfiluxError(f"recv failed for code {code}: {err}") from err
             if isinstance(reply, str):
                 reply = reply.encode("latin-1", "ignore")
@@ -344,7 +368,9 @@ class Controller:
         for i in range(self._count(CODE_GET_SENSOR_COUNT, MAX_SENSORS)):
             offset = _sensor_offset(i)
             type_id = self._t.get_int(CODE_SENSOR_TYPE + offset, signed=False)
-            if not type_id:  # 0 == "None" == not populated
+            if type_id is None:  # no reply — past the controller's real slots
+                break
+            if type_id == 0:  # empty slot
                 continue
 
             decimals_raw = self._t.get_int(CODE_SENSOR_DISPLAYMODE + offset, signed=False)
@@ -373,8 +399,8 @@ class Controller:
         result: list[dict[str, Any]] = []
         for i in range(self._count(CODE_GET_SWITCH_COUNT, MAX_SOCKETS)):
             state = self._t.get_int(CODE_SOCKET_STATE + _block_offset(i, 24, 1), signed=False)
-            if state is None:
-                continue
+            if state is None:  # no reply — past the controller's real sockets
+                break
             name = self._t.get_text(CODE_SOCKET_NAME + _block_offset(i, 64, 1))
             result.append({"index": i, "name": name, "is_on": state != 0})
         return result
