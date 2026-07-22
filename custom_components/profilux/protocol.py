@@ -860,7 +860,10 @@ class Controller:
                 if number in seen:
                     continue  # single-sensor loop: both sub-controls point at one sensor
                 seen.add(number)
-                triggered = None if di_mask is None else bool((di_mask >> (number - 1)) & 1)
+                # A float sitting in water reads the input bit as 0 on this
+                # controller, so "wet" is the *cleared* bit (moisture = not bit).
+                bit = None if di_mask is None else bool((di_mask >> (number - 1)) & 1)
+                triggered = None if bit is None else not bit
                 sensors.append({"role": role, "number": number, "triggered": triggered})
 
             result.append(

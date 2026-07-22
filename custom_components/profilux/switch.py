@@ -15,7 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS, DOMAIN
+from .const import CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS, DOMAIN, MAINS_VOLTAGE
 from .coordinator import ProfiluxCoordinator
 from .entity import ProfiluxEntity, async_add_discovered
 
@@ -77,10 +77,14 @@ class ProfiluxSocketSwitch(ProfiluxEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self._socket_data or {}
+        current = data.get("current")
         return {
             # "auto" = following the controller's automation; "on"/"off" = forced.
             "mode": data.get("mode"),
             "can_restore_auto": self.coordinator.auto_function(self._index) is not None,
+            # Power info for this outlet, shown alongside the toggle in more-info.
+            "current_a": current,
+            "power_w": None if current is None else round(current * MAINS_VOLTAGE),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
