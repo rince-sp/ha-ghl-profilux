@@ -160,6 +160,18 @@ def _sensor_offset(index: int) -> int:
     return _block_offset(index, 8, 24)
 
 
+def _decode_16bit_fields(raw: int | None) -> list[int]:
+    """Split a packed integer into its 16-bit little-endian fields (low first).
+
+    High-order zero fields are dropped by the integer, so trailing empty fields
+    simply won't appear.
+    """
+    if not raw:
+        return []
+    count = (raw.bit_length() + 15) // 16
+    return [(raw >> (16 * i)) & 0xFFFF for i in range(count)]
+
+
 def _decode_socket_currents(raw: int | None) -> dict[int, float]:
     """Decode the powerbar current register into {socket_index: amps}.
 
@@ -167,17 +179,8 @@ def _decode_socket_currents(raw: int | None) -> dict[int, float]:
     High-order zero fields are dropped by the integer, so trailing sockets that
     draw no current simply won't appear.
     """
-    if not raw:
-        return {}
-    nibbles = [(raw >> (4 * i)) & 0xF for i in range((raw.bit_length() + 3) // 4)]
-    while len(nibbles) % 4:
-        nibbles.append(0)
-    currents: dict[int, float] = {}
-    for field in range(len(nibbles) // 4):
-        k = field * 4
-        milliamps = nibbles[k] | (nibbles[k + 1] << 4) | (nibbles[k + 2] << 8) | (nibbles[k + 3] << 12)
-        currents[field] = round(milliamps / 1000.0, 2)
-    return currents
+    fields = _decode_16bit_fields(raw)
+    return {i: round(ma / 1000.0, 2) for i, ma in enumerate(fields)}
 
 
 # =========================================================================
@@ -724,6 +727,21 @@ def diagnostic(
         l_name_c = {i: CODE_LEVEL_NAME + _block_offset(i, 64, 1) for i in range(4)}
         probe_codes = list(range(10124, 10146))  # around SP_ALL_STATE/CURRENT
 
+        # Wide current sweep: the powerbar current array (10128) only carries the
+        # first 16 sockets, so channels 16+ (e.g. an Orphek light, a virtual
+        # channel) draw current the app shows but that array doesn't hold. Scan a
+        # broad code range plus the +1000 mega-block banks and decode each value
+        # as 16-bit little-endian mA fields, so a single run pinpoints whichever
+        # register carries the higher channels' current.
+        sweep_codes = (
+            list(range(10124, 10160))
+            + list(range(11124, 11160))
+            + list(range(12124, 12160))
+        )
+        # Also probe socket state/name for the higher channels via the +1000
+        # mega-block, in case a second socket bank lives there.
+        hi_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) + MEGA_BLOCK_SIZE for i in range(16, 24)}
+
         s_types = transport.get_many_int(list(s_type_c.values()), signed=False)
         s_vals = transport.get_many_int(list(s_val_c.values()))
         s_names = transport.get_many_text(list(s_name_c.values()))
@@ -736,6 +754,8 @@ def diagnostic(
         digital_inputs = ctrl._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
         digital_input_count = ctrl._get_int(CODE_GET_DIGITAL_INPUT_COUNT, signed=False)
         probes = transport.get_many_int(probe_codes, signed=False)
+        sweep_raw = transport.get_many_int(sweep_codes, signed=False)
+        hi_states = transport.get_many_int(list(hi_state_c.values()), signed=False)
         all_state = ctrl._get_int(CODE_SOCKET_ALL_STATE, signed=False)
         socket_currents = _decode_socket_currents(
             ctrl._get_int(CODE_SOCKET_CURRENT_ARRAY, signed=False)
@@ -775,6 +795,16 @@ def diagnostic(
         }
         for i in range(4)
     ]
+    # Any swept code whose decoded 16-bit fields look like plausible currents
+    # (at least one field in the 20 mA – 5 A range) is a candidate register for
+    # the higher channels' current.
+    current_sweep = {}
+    for code, val in sweep_raw.items():
+        fields = _decode_16bit_fields(val)
+        if any(20 <= f <= 5000 for f in fields):
+            current_sweep[code] = fields
+    hi_bank = {i: hi_states.get(hi_state_c[i]) for i in range(16, 24) if hi_states.get(hi_state_c[i]) is not None}
+
     return {
         "counts": counts,
         "all_state_raw": all_state,
@@ -782,6 +812,8 @@ def diagnostic(
         "digital_inputs_raw": digital_inputs,
         "digital_input_count": digital_input_count,
         "probe_codes": {c: v for c, v in probes.items()},
+        "current_sweep": current_sweep,
+        "hi_bank_state": hi_bank,
         "sensors": sensors,
         "sockets": sockets,
         "levels": levels,

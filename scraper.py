@@ -99,6 +99,16 @@ def main() -> int:
         print("\nUNKNOWN code probes (10124-10145):")
         for code, val in sorted(dump["probe_codes"].items()):
             print(f"  code {code}: {val}  (bin {val:016b})")
+        print("\nHIGHER SOCKET BANK state (mega-block, idx 16-23):")
+        hb = dump.get("hi_bank_state") or {}
+        print(f"  {hb!r}" if hb else "  (no second bank answered)")
+        print("\nCURRENT SWEEP — codes whose 16-bit fields look like currents (mA):")
+        sweep = dump.get("current_sweep") or {}
+        if not sweep:
+            print("  (none found in the swept range)")
+        for code, fields in sorted(sweep.items()):
+            shown = ", ".join(f"[{i}]={f}" for i, f in enumerate(fields) if f)
+            print(f"  code {code}: {shown}")
         return 0
 
     order = (

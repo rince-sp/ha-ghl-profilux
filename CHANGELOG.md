@@ -5,6 +5,22 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Wide current sweep** in the diagnostic dump (`scraper.py --debug`). The
+  powerbar current array (code `10128`) only carries the first 16 sockets, so
+  higher switching channels (e.g. an Orphek light on channel 17, a virtual
+  channel on 18) show a current in the GHL app that this array does not hold.
+  The sweep scans a broad code range plus the `+1000` mega-block banks and
+  decodes each value as 16-bit little-endian mA fields, so a single run
+  pinpoints whichever register carries those channels' current. The dump also
+  probes a possible higher socket bank via the mega-block state offset.
+
+### Changed
+- Refactored the per-socket current decoder onto a shared 16-bit little-endian
+  field splitter (`_decode_16bit_fields`); no change to the decoded values.
+
 ## [1.2.0] - 2026-07-22
 
 ### Added
@@ -26,28 +42,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-07-22
 
-Initial release.
+Initial release. Reads a GHL ProfiLux controller over the local network and
+exposes its sensors, power sockets, level control loops and alarm to Home
+Assistant.
 
 ### Added
-- Support for **ProfiLux 3 / 4** (HTTP `communication.php` interface) and the
-  **ProfiLux mini** (WebSocket interface); the interface is selectable in the
-  config flow.
+- **Two local transports**, selectable in the config flow: the raw SWMBus
+  frames tunnelled over **WebSocket** (`ws://<host>/ws`, the path ProfiLux 4
+  firmware answers on) and the documented **HTTP** `communication.php`
+  interface. Both drive the same protocol layer, so entities are identical
+  either way.
 - **Sensors** — auto-discovered, scaled and classified (temperature, pH, redox,
   conductivity, humidity, oxygen, voltage, …), by GHL type id when valid and
-  otherwise by probe name.
-- **Power sockets** — on/off state for physical sockets (state register) and for
-  digital-powerbar channels (derived from the decoded per-socket current).
-- **Per-socket current** sensors and a `current_a` attribute (digital powerbar).
-- **Level control loops** ("Niveau") — per-loop alarm/fill/drain binary sensor.
+  otherwise by probe name (the type register is unreliable on some firmwares).
+- **Power sockets** — on/off state per socket, exposed as `power` binary
+  sensors, with the measured **current** carried as a `current_a` attribute.
+- **Per-socket current** sensors, plus a device-wide **total current** input to
+  the power estimate.
+- **Level control loops** ("Niveau") — a per-loop alarm/fill/drain binary
+  sensor.
 - **Controller alarm** binary sensor.
-- Reliable transport: frame checksum (BCA/BCC) validation and batched,
-  retrying reads that tolerate the controller's occasional dropped/corrupt frame.
+- Reliable reads: frame checksum (BCA/BCC) validation and batched, retrying
+  reads that tolerate the controller's occasional dropped or corrupt frame.
 - HACS brand **icon** and **logo**.
 - A ready-made **Lovelace dashboard** (`dashboards/aquarium.yaml`) — sensor
   gauges, socket outlet tiles, and a level/alarm row.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[Unreleased]: https://github.com/rince-sp/ha-ghl-profilux/compare/v1.2.0...HEAD
 [1.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.2.0
 [1.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.1.0
 [1.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.0.0
