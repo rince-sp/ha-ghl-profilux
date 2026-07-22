@@ -1,12 +1,14 @@
 {
   "domain": "profilux",
   "name": "ProfiLux",
+  "after_dependencies": ["frontend"],
   "codeowners": ["@rince-sp"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/rince-sp/ha-ghl-profilux",
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/rince-sp/ha-ghl-profilux/issues",
   "requirements": ["websocket-client>=1.6.0"],
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

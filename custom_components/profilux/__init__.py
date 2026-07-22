@@ -7,6 +7,9 @@ entities.
 """
 from __future__ import annotations
 
+import logging
+import os
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -14,7 +17,29 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .coordinator import ProfiluxCoordinator
 
+_LOGGER = logging.getLogger(__name__)
+
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+STRATEGY_URL = "/profilux_frontend/profilux-strategy.js"
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve the dashboard-strategy JS and load it in the frontend (once)."""
+    if hass.data.get(f"{DOMAIN}_frontend_registered"):
+        return
+    try:
+        from homeassistant.components.frontend import add_extra_js_url
+        from homeassistant.components.http import StaticPathConfig
+
+        js_path = os.path.join(os.path.dirname(__file__), "frontend", "profilux-strategy.js")
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(STRATEGY_URL, js_path, False)]
+        )
+        add_extra_js_url(hass, STRATEGY_URL)
+        hass.data[f"{DOMAIN}_frontend_registered"] = True
+    except Exception as err:  # noqa: BLE001 - never fail setup over the optional dashboard
+        _LOGGER.warning("Could not register ProfiLux dashboard strategy: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -23,6 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    await _async_register_frontend(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

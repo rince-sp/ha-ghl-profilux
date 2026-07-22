@@ -107,7 +107,28 @@ Home Assistant config flow.
 
 ## Dashboard
 
-A ready-made Lovelace dashboard ships with the integration at
+### Auto-generating strategy (recommended)
+
+The integration ships a Lovelace **strategy** and loads it as a frontend
+resource on setup, so a dashboard can build **itself** from your ProfiLux
+entities — no entity IDs to edit. After installing + restarting:
+
+1. **Settings → Dashboards → Add dashboard → New dashboard** → open it → ⋯ →
+   **Edit dashboard** → **Take control** → ⋯ → **Raw configuration editor**.
+2. Replace the contents with:
+   ```yaml
+   strategy:
+     type: custom:profilux
+   ```
+3. Save. It generates sensor gauges, socket outlet tiles, a per-socket current
+   row, and a level/alarm row, and stays current as entities change.
+
+> If `custom:profilux` isn't found, hard-refresh the browser (the frontend
+> caches resources) or clear the browser cache, then reload.
+
+### Static YAML dashboard
+
+Prefer a hand-editable copy? A ready-made one ships at
 [`dashboards/aquarium.yaml`](dashboards/aquarium.yaml) — sensor **gauge** cards,
 power sockets as **outlet tiles**, and a level/alarm row.
 
