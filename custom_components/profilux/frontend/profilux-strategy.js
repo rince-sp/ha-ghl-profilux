@@ -55,6 +55,9 @@ class ProfiluxDashboardStrategy {
         !/_(min|max)_float$/.test(id)
     );
 
+    const totalCurrent = ids.find((id) => id.endsWith("_total_current"));
+    const socketCurrents = power.filter((id) => !id.includes("total"));
+
     const gaugeCard = (id) => {
       const unit = stateOf(id) ? stateOf(id).attributes.unit_of_measurement : undefined;
       const r = RANGES[unit] || {};
@@ -69,23 +72,33 @@ class ProfiluxDashboardStrategy {
       type: "tile",
       entity: id,
       icon: "mdi:power-socket-de",
+      color: "amber",
       grid_options: { columns: 4 },
     });
-    const tile = (id, columns) => ({ type: "tile", entity: id, grid_options: { columns } });
+    const tile = (id, columns, extra) => ({
+      type: "tile",
+      entity: id,
+      grid_options: { columns },
+      ...(extra || {}),
+    });
     const heading = (heading, icon) => ({ type: "heading", heading, icon });
+    const subheading = (heading) => ({ type: "heading", heading_style: "subtitle", heading });
 
     const sections = [];
+
+    // Sensors — gauges, two per row.
     if (gauges.length) {
-      sections.push({ type: "grid", cards: [heading("Sensoren", "mdi:gauge"), ...gauges.map(gaugeCard)] });
-    }
-    if (sockets.length) {
       sections.push({
         type: "grid",
-        cards: [heading("Schaltkanäle", "mdi:power-socket-de"), ...sockets.map(socketCard)],
+        cards: [heading("Sensoren", "mdi:gauge"), ...gauges.map(gaugeCard)],
       });
     }
+
+    // Power & current — totals up top (side by side), 24 h trend, per-socket draw.
     if (power.length) {
       const cards = [heading("Leistung & Stromaufnahme", "mdi:flash")];
+      if (totalPower) cards.push(tile(totalPower, 6, { color: "orange", icon: "mdi:flash" }));
+      if (totalCurrent) cards.push(tile(totalCurrent, 6, { color: "orange", icon: "mdi:current-ac" }));
       if (totalPower) {
         cards.push({
           type: "history-graph",
@@ -94,32 +107,55 @@ class ProfiluxDashboardStrategy {
           grid_options: { columns: "full", rows: 4 },
         });
       }
-      cards.push(...power.map((id) => tile(id, id.includes("total") ? 6 : 4)));
+      if (socketCurrents.length) {
+        cards.push(subheading("Pro Steckdose"));
+        cards.push(...socketCurrents.map((id) => tile(id, 4)));
+      }
       sections.push({ type: "grid", cards });
     }
+
+    // Switching channels — outlet tiles.
+    if (sockets.length) {
+      sections.push({
+        type: "grid",
+        cards: [heading("Schaltkanäle", "mdi:power-socket-de"), ...sockets.map(socketCard)],
+      });
+    }
+
+    // Dosing pumps — reservoir fill level.
     if (dosing.length) {
       sections.push({
         type: "grid",
         cards: [
           heading("Dosierpumpen", "mdi:cup-water"),
-          ...dosing.map((id) => ({
-            type: "tile",
-            entity: id,
-            grid_options: { columns: 6 },
+          ...dosing.map((id) => tile(id, 6, {
+            color: "light-blue",
+            icon: "mdi:cup-water",
+            state_content: ["state", "percent"],
           })),
         ],
       });
     }
+
+    // Level loops — per loop: status, then its min/max float switches; alarms last.
     if (status.length || alarms.length || floats.length) {
-      sections.push({
-        type: "grid",
-        cards: [
-          heading("Niveau & Alarm", "mdi:water-percent"),
-          ...status.map((id) => tile(id, 6)),
-          ...floats.map((id) => tile(id, 6)),
-          ...alarms.map((id) => tile(id, 6)),
-        ],
-      });
+      const cards = [heading("Niveau & Alarm", "mdi:water-percent")];
+      for (const st of status) {
+        const stem = st.replace(/_status$/, "");
+        cards.push(tile(st, 12, { icon: "mdi:waves" }));
+        for (const f of floats.filter((id) => id.includes(stem.replace(/^sensor\./, "")))) {
+          cards.push(tile(f, 6));
+        }
+      }
+      // Any floats we couldn't pair to a status, then the alarms.
+      const paired = new Set();
+      for (const st of status) {
+        const key = st.replace(/^sensor\./, "").replace(/_status$/, "");
+        floats.filter((id) => id.includes(key)).forEach((id) => paired.add(id));
+      }
+      cards.push(...floats.filter((id) => !paired.has(id)).map((id) => tile(id, 6)));
+      cards.push(...alarms.map((id) => tile(id, 6, { icon: "mdi:alert" })));
+      sections.push({ type: "grid", cards });
     }
 
     return {

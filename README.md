@@ -109,28 +109,50 @@ Home Assistant config flow.
 
 ### Auto-generating strategy (recommended)
 
-The integration ships a Lovelace **strategy** and loads it as a frontend
-resource on setup, so a dashboard can build **itself** from your ProfiLux
-entities — no entity IDs to edit. After installing + restarting:
+The integration ships a Lovelace **strategy** and registers it as a frontend
+resource automatically on setup, so a dashboard can build **itself** from your
+ProfiLux entities — no entity IDs to type, and it restructures itself as
+entities are added, renamed or removed.
 
-1. **Settings → Dashboards → Add dashboard → New dashboard** → open it → ⋯ →
-   **Edit dashboard** → **Take control** → ⋯ → **Raw configuration editor**.
-2. Replace the contents with:
+It lays out, in order: **sensor gauges**, **power & current** (total power +
+current, a 24 h trend, per-socket draw), **switching channels** as outlet tiles,
+**dosing-pump** fill levels, and a **level & alarm** section (each loop's status
+with its min/max float switches).
+
+**Install it (one time):**
+
+1. Make sure the integration is installed and Home Assistant has been restarted
+   at least once since — that's when the strategy resource is registered.
+2. Go to **Settings → Dashboards → Add dashboard → New dashboard from scratch**.
+   Give it a title (e.g. *Aquarium*) and an icon (e.g. `mdi:fishbowl`), open it.
+3. Top-right ⋯ → **Edit dashboard**; if asked, **Take control**. Then ⋯ again →
+   **Raw configuration editor**.
+4. Delete everything in the editor and paste exactly:
    ```yaml
    strategy:
      type: custom:profilux
    ```
-3. Save. It generates sensor gauges, socket outlet tiles, a per-socket current
-   row, and a level/alarm row, and stays current as entities change.
+5. **Save**. The dashboard renders itself from your current entities.
 
-> If `custom:profilux` isn't found, hard-refresh the browser (the frontend
-> caches resources) or clear the browser cache, then reload.
+Optional — give the view a custom title:
+```yaml
+strategy:
+  type: custom:profilux
+  title: Reef Tank
+```
+
+> **`custom:profilux` not found?** The browser caches frontend resources. Do a
+> hard refresh (Ctrl/Cmd-Shift-R) or clear the cache and reload. If it still
+> can't be found, confirm the integration is loaded (Settings → Devices &
+> Services → ProfiLux) and restart Home Assistant once — the resource is added
+> on integration setup.
 
 ### Static YAML dashboard
 
 Prefer a hand-editable copy? A ready-made one ships at
-[`dashboards/aquarium.yaml`](dashboards/aquarium.yaml) — sensor **gauge** cards,
-power sockets as **outlet tiles**, and a level/alarm row.
+[`dashboards/aquarium.yaml`](dashboards/aquarium.yaml) — sensor **gauges**,
+socket **outlet tiles**, a **power & current** section, **dosing-pump** fill
+levels, and a **level & alarm** row.
 
 > Home Assistant does not let an integration auto-create a user dashboard, so
 > this can't install *itself* — but it's versioned here alongside the code so it
@@ -149,8 +171,9 @@ power sockets as **outlet tiles**, and a level/alarm row.
 >         filename: ha-ghl-profilux/dashboards/aquarium.yaml
 >   ```
 >
-> The `entity:` IDs in the file follow one controller's socket names — adjust
-> them to your own if they differ.
+> The `entity:` IDs in the file are generic placeholders (`socket_1`,
+> `dosing_pump_1`, `level_1`, …) — swap in your own entity IDs, or just use the
+> auto-generating strategy above, which needs none.
 
 ## Versioning
 

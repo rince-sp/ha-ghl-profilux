@@ -5,6 +5,16 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-07-22
+
+### Changed
+- **Prettier, fuller dashboards.** The auto-generating strategy is restructured
+  into clear sections — sensor gauges, power & current (totals + 24 h trend +
+  per-socket draw), switching channels, dosing pumps (with % full), and level
+  loops paired with their min/max float switches — with icons and colour. The
+  bundled example dashboard mirrors the same layout, and the README documents
+  how to install the strategy dashboard step by step.
+
 ## [1.5.1] - 2026-07-22
 
 ### Changed
@@ -110,6 +120,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[1.5.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.2
 [1.5.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.1
 [1.5.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.5.0
 [1.4.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.4.0
