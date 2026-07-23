@@ -831,7 +831,6 @@ class Controller:
         prop_code = {i: CODE_LEVEL_CTRL_PROPS + i * MEGA_BLOCK_SIZE for i in idxs}
         sources = self._t.get_many_int(list(src_code.values()), signed=False)
         props = self._t.get_many_int(list(prop_code.values()), signed=False)
-        di_mask = self._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
 
         present = [i for i in idxs if state_code[i] in states or names.get(name_code[i])]
         result: list[dict[str, Any]] = []
@@ -856,15 +855,19 @@ class Controller:
                 src = sources.get(src_code[(i, sub)])
                 if src is None:
                     continue
-                number = (src >> 4) + 1  # 1-based float-sensor / digital-input number
+                number = (src >> 4) + 1  # 1-based level-sensor input number
                 if number in seen:
                     continue  # single-sensor loop: both sub-controls point at one sensor
                 seen.add(number)
-                # A float sitting in water reads the input bit as 0 on this
-                # controller, so "wet" is the *cleared* bit (moisture = not bit).
-                bit = None if di_mask is None else bool((di_mask >> (number - 1)) & 1)
-                triggered = None if bit is None else not bit
-                sensors.append({"role": role, "number": number, "triggered": triggered})
+                # The individual float's live wet/dry state is not exposed by
+                # this firmware over the local protocol. The level floats are
+                # LEVELSENSORINPUTs — a namespace separate from the digital
+                # inputs (which on this controller are all FUNCTION 15), so the
+                # digital-input mask (CODE_DIGITAL_INPUTS_STATE) reads a constant
+                # 0 and no readable runtime register in the polled range tracks
+                # them. We report the confirmed sensor number but leave the live
+                # state unknown rather than fabricate it from that constant mask.
+                sensors.append({"role": role, "number": number, "triggered": None})
 
             result.append(
                 {
@@ -966,6 +969,36 @@ def read_range(
     diffing two captures (e.g. a float sensor wet vs. dry)."""
     with make_transport(interface, host, username, password) as transport:
         return transport.get_many_int(list(range(start, end + 1)), signed=False)
+
+
+def scan_range(
+    host: str,
+    username: str,
+    password: str,
+    start: int,
+    end: int,
+    interface: str = INTERFACE_WEBSOCKET,
+    repeat: int = 2,
+) -> dict[int, int]:
+    """Read every code in a range **individually** (each via the retrying single
+    read), ``repeat`` times, and return only codes that answered with the *same*
+    value on every pass.
+
+    Unlike ``read_range`` (a batch read, where the controller silently skips the
+    odd code so a constant can look like it "disappeared"), this reads one code
+    at a time and keeps only stable answers — so diffing two scans (e.g. a float
+    dry vs. wet) reliably reveals the register that actually changed, without the
+    batch read's drop-out noise. Slower, so keep the range modest.
+    """
+    with make_transport(interface, host, username, password) as transport:
+        ctrl = Controller(transport)
+        stable: dict[int, int] = {}
+        for code in range(start, end + 1):
+            vals = [ctrl._get_int(code, signed=False) for _ in range(max(1, repeat))]
+            first = vals[0]
+            if first is not None and all(v == first for v in vals):
+                stable[code] = first
+        return stable
 
 
 def write_and_verify(

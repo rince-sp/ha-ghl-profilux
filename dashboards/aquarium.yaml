@@ -1,7 +1,11 @@
 # ProfiLux aquarium dashboard (Lovelace, "sections" view).
 #
-# Sensor gauges, power-socket tiles, power/current, dosing-pump fill levels,
-# and a level (status + float switches) / alarm row.
+# Layout (two columns wide):
+#   1. Controller alarm            — full width, at the very top
+#   2. Sensors (left) | Power (right)
+#   3. Switching channels          — socket cards
+#   4. Level control loops         — loop cards
+#   5. Dosing pumps                — reservoir fill level
 #
 # The `entity:` IDs below are placeholders — replace them with your own
 # socket/sensor entity IDs (Settings -> Devices & Services -> Entities, filter
@@ -26,9 +30,21 @@ views:
     path: aquarium
     type: sections
     icon: mdi:fishbowl
-    max_columns: 3
+    max_columns: 2
     sections:
+      # 1. Controller alarm — full width, at the very top.
       - type: grid
+        column_span: 2
+        cards:
+          - type: tile
+            entity: binary_sensor.profilux_alarm
+            name: Controller Alarm
+            icon: mdi:alert
+            grid_options: { columns: full }
+
+      # 2a. Sensors (left column).
+      - type: grid
+        column_span: 1
         cards:
           - type: heading
             heading: Sensoren
@@ -67,61 +83,56 @@ views:
             severity: { green: 45, yellow: 56, red: 58 }
             grid_options: { columns: 6 }
 
+      # 2b. Power & current (right column).
       - type: grid
+        column_span: 1
         cards:
           - type: heading
-            heading: Schaltkanäle
-            icon: mdi:power-socket-de
-          # Placeholder entity IDs — replace with your own socket entity IDs
-          # (Settings -> Devices & Services -> Entities, filter "profilux"), or
-          # just use the auto-generating strategy dashboard instead.
-          - { type: tile, entity: binary_sensor.profilux_socket_1, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_socket_2, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_socket_3, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_socket_4, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_socket_5, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_socket_6, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_socket_7, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-          - { type: tile, entity: binary_sensor.profilux_socket_8, icon: mdi:power-socket-de, grid_options: { columns: 4 } }
-
-      - type: grid
-        cards:
-          - type: heading
-            heading: Leistung & Stromaufnahme
+            heading: Stromverbrauch
             icon: mdi:flash
+          - { type: tile, entity: sensor.profilux_total_power, color: orange, icon: mdi:flash, grid_options: { columns: 6 } }
+          - { type: tile, entity: sensor.profilux_total_current, color: orange, icon: mdi:current-ac, grid_options: { columns: 6 } }
           - type: history-graph
             hours_to_show: 24
             entities: [{ entity: sensor.profilux_total_power }]
             grid_options: { columns: full, rows: 4 }
-          - { type: tile, entity: sensor.profilux_total_current, grid_options: { columns: 6 } }
-          - { type: tile, entity: sensor.profilux_total_power, grid_options: { columns: 6 } }
-          # Per-socket current — replace with your own *_current entity IDs.
-          - { type: tile, entity: sensor.profilux_socket_1_current, grid_options: { columns: 4 } }
-          - { type: tile, entity: sensor.profilux_socket_2_current, grid_options: { columns: 4 } }
-          - { type: tile, entity: sensor.profilux_socket_3_current, grid_options: { columns: 4 } }
 
+      # 3. Switching channels — socket cards (name + state colour + power).
+      # Prefer the switch.* entity when socket control is enabled; otherwise use
+      # the binary_sensor.* status entity. Replace with your own entity IDs.
       - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Schaltkanäle
+            icon: mdi:power-socket-de
+          - { type: tile, entity: switch.profilux_socket_1, icon: mdi:power-socket-de, color: amber, state_content: [state, power_w], grid_options: { columns: 4 } }
+          - { type: tile, entity: switch.profilux_socket_2, icon: mdi:power-socket-de, color: amber, state_content: [state, power_w], grid_options: { columns: 4 } }
+          - { type: tile, entity: switch.profilux_socket_3, icon: mdi:power-socket-de, color: amber, state_content: [state, power_w], grid_options: { columns: 4 } }
+          - { type: tile, entity: switch.profilux_socket_4, icon: mdi:power-socket-de, color: amber, state_content: [state, power_w], grid_options: { columns: 4 } }
+          - { type: tile, entity: switch.profilux_socket_5, icon: mdi:power-socket-de, color: amber, state_content: [state, power_w], grid_options: { columns: 4 } }
+          - { type: tile, entity: switch.profilux_socket_6, icon: mdi:power-socket-de, color: amber, state_content: [state, power_w], grid_options: { columns: 4 } }
+
+      # 4. Level control loops — one card per loop, coloured by its alarm state
+      # (red = fault, e.g. a dry float; neutral = OK). Tapping the card lists the
+      # sensors assigned to the loop.
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Niveau-Regelkreise
+            icon: mdi:water-percent
+          - { type: tile, entity: binary_sensor.profilux_level_1_alarm, name: Level 1, icon: mdi:waves, grid_options: { columns: 4 } }
+          - { type: tile, entity: binary_sensor.profilux_level_2_alarm, name: Level 2, icon: mdi:waves, grid_options: { columns: 4 } }
+
+      # 5. Dosing pumps — reservoir fill level.
+      - type: grid
+        column_span: 2
         cards:
           - type: heading
             heading: Dosierpumpen
             icon: mdi:cup-water
-          # Fill level per in-use dosing pump — replace with your own
-          # *_fill_level entity IDs.
-          - { type: tile, entity: sensor.profilux_dosing_pump_1_fill_level, grid_options: { columns: 6 } }
-          - { type: tile, entity: sensor.profilux_dosing_pump_2_fill_level, grid_options: { columns: 6 } }
-          - { type: tile, entity: sensor.profilux_dosing_pump_3_fill_level, grid_options: { columns: 6 } }
-          - { type: tile, entity: sensor.profilux_dosing_pump_4_fill_level, grid_options: { columns: 6 } }
-
-      - type: grid
-        cards:
-          - type: heading
-            heading: Niveau & Alarm
-            icon: mdi:water-percent
-          # Per loop: overall status, its min/max float switches, and its alarm.
-          - { type: tile, entity: sensor.profilux_level_1_status, name: Level 1, grid_options: { columns: 6 } }
-          - { type: tile, entity: binary_sensor.profilux_level_1_min_float, grid_options: { columns: 3 } }
-          - { type: tile, entity: binary_sensor.profilux_level_1_max_float, grid_options: { columns: 3 } }
-          - { type: tile, entity: sensor.profilux_level_2_status, name: Level 2, grid_options: { columns: 6 } }
-          - { type: tile, entity: binary_sensor.profilux_level_2_min_float, grid_options: { columns: 3 } }
-          - { type: tile, entity: binary_sensor.profilux_level_2_max_float, grid_options: { columns: 3 } }
-          - { type: tile, entity: binary_sensor.profilux_alarm, name: Controller Alarm, grid_options: { columns: 6 } }
+          - { type: tile, entity: sensor.profilux_dosing_pump_1_fill_level, color: light-blue, icon: mdi:cup-water, state_content: [state, percent], grid_options: { columns: 6 } }
+          - { type: tile, entity: sensor.profilux_dosing_pump_2_fill_level, color: light-blue, icon: mdi:cup-water, state_content: [state, percent], grid_options: { columns: 6 } }
+          - { type: tile, entity: sensor.profilux_dosing_pump_3_fill_level, color: light-blue, icon: mdi:cup-water, state_content: [state, percent], grid_options: { columns: 6 } }
+          - { type: tile, entity: sensor.profilux_dosing_pump_4_fill_level, color: light-blue, icon: mdi:cup-water, state_content: [state, percent], grid_options: { columns: 6 } }
