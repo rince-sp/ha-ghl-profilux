@@ -153,13 +153,19 @@ class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
+        # `triggered` is None on firmware that doesn't expose per-float state
+        # over the local protocol, so the entity reads "unknown" rather than a
+        # fabricated wet/dry. The assigned sensor number is still reported.
         data = self._sensor
         return None if data is None else data.get("triggered")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self._sensor or {}
-        return {"sensor_number": data.get("number")}
+        attrs: dict[str, Any] = {"sensor_number": data.get("number")}
+        if data.get("triggered") is None:
+            attrs["live_state"] = "not reported by this controller firmware"
+        return attrs
 
     @property
     def available(self) -> bool:

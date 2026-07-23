@@ -5,6 +5,19 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-07-23
+
+### Fixed
+- **Level-loop floats no longer report a wrong wet/dry state.** The individual
+  min/max float sensors are not exposed by this controller firmware over the
+  local protocol — the float inputs are level-sensor inputs, a namespace
+  separate from the digital inputs, and the digital-input mask the integration
+  read for them is a constant zero. That made every float read "wet". They now
+  report **unknown** instead of a fabricated value, and carry a `live_state`
+  attribute noting the state isn't reported by the controller. The confirmed
+  min/max **sensor number** (decoded from each loop's source configuration, and
+  cross-checked against a controller backup) is still surfaced as an attribute.
+
 ## [1.8.0] - 2026-07-22
 
 ### Fixed
@@ -177,6 +190,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[1.8.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.8.1
 [1.8.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.8.0
 [1.7.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.7.1
 [1.7.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.7.0
