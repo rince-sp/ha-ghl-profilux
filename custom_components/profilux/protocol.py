@@ -102,6 +102,11 @@ DOSING_MODES = {0: "Aus", 1: "Dauerlauf", 2: "Automatische Zeiten", 3: "Individu
 # Digital inputs (float switches feed the level loops)
 CODE_DIGITAL_INPUTS_STATE = 10091  # bitmask of all digital input states
 CODE_GET_DIGITAL_INPUT_COUNT = 10505
+# Global level-sensor fault flag: 0 while every level float is submerged (wet),
+# non-zero (0xFF) as soon as any level float goes dry. Confirmed by reliable
+# per-code scans (dry vs. wet) — it is a controller-wide flag, not a per-sensor
+# bitmask, so it tells us "all wet" vs. "at least one dry", not which one.
+CODE_LEVEL_FAULT = 10089
 
 CODE_GET_SENSOR_COUNT = 10500
 CODE_GET_SWITCH_COUNT = 10501
@@ -814,7 +819,20 @@ class Controller:
         raw = self._get_int(CODE_IS_ALARM, signed=False)
         return None if raw is None else raw != 0
 
-    def levels(self) -> list[dict[str, Any]]:
+    def level_fault(self) -> int | None:
+        """Global level-sensor fault flag (0 = all floats wet, non-zero = a dry
+        float somewhere). See ``CODE_LEVEL_FAULT``."""
+        return self._get_int(CODE_LEVEL_FAULT, signed=False)
+
+    def levels(self, fault: int | None = -1) -> list[dict[str, Any]]:
+        # ``fault`` defaults to the sentinel -1 meaning "read it here"; the
+        # snapshot passes the value it already read so we don't read twice.
+        if fault == -1:
+            fault = self.level_fault()
+        # When the global fault flag is a known 0, *no* level float is dry, so
+        # every assigned float is certainly wet. When it is non-zero (a dry float
+        # exists) we can't tell which one from this flag, so those stay unknown.
+        all_wet = fault == 0
         idxs = list(range(MAX_LEVELS))
         state_code = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in idxs}
         states = self._t.get_many_int(list(state_code.values()), signed=False)
@@ -859,15 +877,14 @@ class Controller:
                 if number in seen:
                     continue  # single-sensor loop: both sub-controls point at one sensor
                 seen.add(number)
-                # The individual float's live wet/dry state is not exposed by
-                # this firmware over the local protocol. The level floats are
-                # LEVELSENSORINPUTs — a namespace separate from the digital
-                # inputs (which on this controller are all FUNCTION 15), so the
-                # digital-input mask (CODE_DIGITAL_INPUTS_STATE) reads a constant
-                # 0 and no readable runtime register in the polled range tracks
-                # them. We report the confirmed sensor number but leave the live
-                # state unknown rather than fabricate it from that constant mask.
-                sensors.append({"role": role, "number": number, "triggered": None})
+                # Per-float live state isn't individually exposed by this
+                # firmware (the digital-input mask reads a constant 0; the floats
+                # are a separate LEVELSENSORINPUT namespace). But the global fault
+                # flag lets us be certain in the common case: when it is 0, every
+                # float is wet. When a dry float exists we can't say which, so it
+                # stays unknown. The confirmed sensor number is always reported.
+                triggered = True if all_wet else None
+                sensors.append({"role": role, "number": number, "triggered": triggered})
 
             result.append(
                 {
@@ -912,12 +929,14 @@ class Controller:
         return False
 
     def snapshot(self) -> dict[str, Any]:
+        fault = self.level_fault()
         return {
             "device": self.device_info(),
             "alarm": self.alarm(),
             "sensors": self.sensors(0),
             "sockets": self.sockets(0),
-            "levels": self.levels(),
+            "levels": self.levels(fault=fault),
+            "level_fault": None if fault is None else bool(fault),
             "dosing_pumps": self.dosing_pumps(),
         }
 

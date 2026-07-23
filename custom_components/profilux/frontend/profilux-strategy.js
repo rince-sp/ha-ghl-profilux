@@ -50,10 +50,12 @@ class ProfiluxDashboardStrategy {
     const alarms = ids.filter(
       (id) => id.startsWith("binary_sensor.") && id.endsWith("_alarm")
     );
+    const levelFault = ids.find((id) => id.endsWith("_level_fault"));
     const socketSensors = ids.filter(
       (id) =>
         id.startsWith("binary_sensor.") &&
         !id.endsWith("_alarm") &&
+        !id.endsWith("_level_fault") &&
         !/_(min|max)_float$/.test(id)
     );
 
@@ -166,7 +168,19 @@ class ProfiluxDashboardStrategy {
     const loopKey = (id) =>
       socketName(id).replace(/_(status|alarm|min_float|max_float)$/, "");
     const loopNames = [...new Set([...levelAlarms, ...status].map(loopKey))];
-    if (loopNames.length) {
+    if (loopNames.length || levelFault) {
+      const cards = [heading("Niveau-Regelkreise", "mdi:water-percent")];
+      // Controller-wide level fault first: green when all floats are wet, red
+      // when any is dry.
+      if (levelFault) {
+        cards.push({
+          type: "tile",
+          entity: levelFault,
+          name: "Level-Sensoren",
+          icon: "mdi:water-check",
+          grid_options: { columns: "full" },
+        });
+      }
       const loopCards = loopNames.map((nm) => {
         const alarm = levelAlarms.find((id) => loopKey(id) === nm);
         const stat = status.find((id) => loopKey(id) === nm);
@@ -181,11 +195,8 @@ class ProfiluxDashboardStrategy {
           grid_options: { columns: 4 },
         };
       });
-      sections.push({
-        type: "grid",
-        column_span: 2,
-        cards: [heading("Niveau-Regelkreise", "mdi:water-percent"), ...loopCards],
-      });
+      cards.push(...loopCards);
+      sections.push({ type: "grid", column_span: 2, cards });
     }
 
     // 5. Dosing pumps — reservoir fill level, full width.

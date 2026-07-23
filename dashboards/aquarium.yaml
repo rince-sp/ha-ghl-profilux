@@ -122,6 +122,9 @@ views:
           - type: heading
             heading: Niveau-Regelkreise
             icon: mdi:water-percent
+          # Controller-wide level-sensor fault: green when all floats are wet,
+          # red as soon as any float goes dry.
+          - { type: tile, entity: binary_sensor.profilux_level_sensor_fault, name: Level-Sensoren, icon: mdi:water-check, grid_options: { columns: full } }
           - { type: tile, entity: binary_sensor.profilux_level_1_alarm, name: Level 1, icon: mdi:waves, grid_options: { columns: 4 } }
           - { type: tile, entity: binary_sensor.profilux_level_2_alarm, name: Level 2, icon: mdi:waves, grid_options: { columns: 4 } }
 

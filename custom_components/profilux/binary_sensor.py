@@ -44,6 +44,8 @@ async def async_setup_entry(
                 )
         if data.get("alarm") is not None:
             yield ("alarm",), (lambda: ProfiluxAlarm(coordinator))
+        if data.get("level_fault") is not None:
+            yield ("level_fault",), (lambda: ProfiluxLevelFault(coordinator))
 
     async_add_discovered(coordinator, entry, async_add_entities, _builder)
 
@@ -183,7 +185,9 @@ class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
             "wet": triggered,
         }
         if triggered is None:
-            attrs["live_state"] = "not reported by this controller firmware"
+            # A dry float exists somewhere, but the controller's global flag
+            # doesn't say which one, so this individual float is unknown.
+            attrs["live_state"] = "a level float is dry (which one is not reported per-sensor)"
         return attrs
 
     @property
@@ -204,3 +208,20 @@ class ProfiluxAlarm(ProfiluxEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return (self.coordinator.data or {}).get("alarm")
+
+
+class ProfiluxLevelFault(ProfiluxEntity, BinarySensorEntity):
+    """Controller-wide level-sensor fault: on (red) when any level float is dry,
+    off (green) when every level float is submerged."""
+
+    _attr_name = "Level sensor fault"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:water-alert"
+
+    def __init__(self, coordinator: ProfiluxCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_level_fault"
+
+    @property
+    def is_on(self) -> bool | None:
+        return (self.coordinator.data or {}).get("level_fault")
