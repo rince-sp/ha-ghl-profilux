@@ -82,7 +82,30 @@ def main() -> int:
     parser.add_argument("--verify", type=int, default=None, help="Code to read back before/after the write")
     parser.add_argument("--yes", action="store_true", help="Skip the write confirmation prompt")
     parser.add_argument("--read", type=int, default=None, metavar="CODE", help="Read a single code and print it")
+    parser.add_argument(
+        "--sweep",
+        nargs=2,
+        type=int,
+        default=None,
+        metavar=("START", "END"),
+        help="Read a code range and print every non-zero value (for diffing two captures)",
+    )
     args = parser.parse_args()
+
+    if args.sweep is not None:
+        iface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface
+        try:
+            vals = protocol.read_range(
+                args.host, args.username, args.password, args.sweep[0], args.sweep[1], interface=iface
+            )
+        except ProfiluxError as err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 1
+        print(f"sweep {args.sweep[0]}-{args.sweep[1]} — non-zero values:")
+        for code, val in sorted(vals.items()):
+            if val:
+                print(f"  code {code}: {val}  (0x{val:X}, bin {val:016b})")
+        return 0
 
     if args.read is not None:
         iface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface

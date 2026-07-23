@@ -954,6 +954,20 @@ def read_code(
         return Controller(transport)._get_int(code, signed=signed)
 
 
+def read_range(
+    host: str,
+    username: str,
+    password: str,
+    start: int,
+    end: int,
+    interface: str = INTERFACE_WEBSOCKET,
+) -> dict[int, int]:
+    """Batch-read a contiguous code range — for locating a live-state register by
+    diffing two captures (e.g. a float sensor wet vs. dry)."""
+    with make_transport(interface, host, username, password) as transport:
+        return transport.get_many_int(list(range(start, end + 1)), signed=False)
+
+
 def write_and_verify(
     host: str,
     username: str,
