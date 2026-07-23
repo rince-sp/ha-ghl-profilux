@@ -1015,6 +1015,10 @@ def diagnostic(
         # Also probe socket state for the higher channels via the +1000 mega-block,
         # in case a second socket bank lives there.
         hi_state_c = {i: CODE_SOCKET_STATE + _block_offset(i, 24, 1) + MEGA_BLOCK_SIZE for i in range(16, 24)}
+        # Level / digital-input live-state region: which of these registers tracks
+        # the actual wet/dry of each float switch (10091 alone reads 0). Dump the
+        # whole block so a run with one float dry reveals the register + bit.
+        state_sweep_codes = list(range(10070, 10096))
 
         # Level-loop config. Each loop has three sub-controls (props/sources/
         # maxduration), stride 4; the two assigned float sensors live in subs
@@ -1045,6 +1049,7 @@ def diagnostic(
         l_srcfull = transport.get_many_int(list(l_srcfull_c.values()), signed=False)
         l_propsfull = transport.get_many_int(list(l_props_c.values()), signed=False)
         sweep_raw = transport.get_many_int(sweep_codes, signed=False)
+        state_sweep = transport.get_many_int(state_sweep_codes, signed=False)
         hi_states = transport.get_many_int(list(hi_state_c.values()), signed=False)
         digital_inputs = ctrl._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
         digital_input_count = ctrl._get_int(CODE_GET_DIGITAL_INPUT_COUNT, signed=False)
@@ -1116,6 +1121,7 @@ def diagnostic(
         "current_sweep": current_sweep,
         "hi_bank_state": hi_bank,
         "level_sources_full": level_sources_full,
+        "state_sweep": {c: v for c, v in state_sweep.items()},
         "sensors": sensors,
         "sockets": sockets,
         "levels": levels,

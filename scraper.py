@@ -160,6 +160,15 @@ def main() -> int:
         print("\nLEVEL config — per loop: props / sources / decoded sensor#:")
         for i, blk in sorted((dump.get("level_sources_full") or {}).items()):
             print(f"  [{i}] props={blk['props']} sources={blk['sources']} sensors={blk['sensor_nrs']}")
+        print("\nLEVEL/DIGITAL state sweep (10070-10095) — nonzero only, with bits:")
+        sweep = dump.get("state_sweep") or {}
+        shown = False
+        for code, val in sorted(sweep.items()):
+            if val:
+                print(f"  code {code}: {val}  (0x{val:X}, bin {val:016b})")
+                shown = True
+        if not shown:
+            print("  (all zero)")
         return 0
 
     order = (
