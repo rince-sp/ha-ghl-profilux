@@ -116,7 +116,14 @@ class ProfiluxLevelAlarm(ProfiluxEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self._level_data or {}
-        return {"fill_active": data.get("fill"), "drain_active": data.get("drain")}
+        return {
+            "fill_active": data.get("fill"),
+            "drain_active": data.get("drain"),
+            "sensors": [
+                {"role": s["role"], "sensor": s["number"], "wet": s["triggered"]}
+                for s in data.get("sensors", [])
+            ],
+        }
 
     @property
     def available(self) -> bool:
@@ -124,9 +131,15 @@ class ProfiluxLevelAlarm(ProfiluxEntity, BinarySensorEntity):
 
 
 class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
-    """One float switch assigned to a level loop (min or max), wet/dry."""
+    """One float switch assigned to a level loop (min or max).
 
-    _attr_device_class = BinarySensorDeviceClass.MOISTURE
+    A submerged (wet) float is the *good* state and a dry float is the fault,
+    so this is modelled as a PROBLEM sensor: ``on`` = dry (fault, red) and
+    ``off`` = wet (OK, green). That way the dashboard shows a dry float in red
+    and a wet float in green, matching the controller's own alarm semantics.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
     def __init__(self, coordinator: ProfiluxCoordinator, index: int, role: str) -> None:
         super().__init__(coordinator)
@@ -153,17 +166,23 @@ class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        # `triggered` is None on firmware that doesn't expose per-float state
-        # over the local protocol, so the entity reads "unknown" rather than a
-        # fabricated wet/dry. The assigned sensor number is still reported.
+        # PROBLEM = dry. `triggered` is the wet state (True = wet); a dry float
+        # (triggered False) is the fault. It is None on firmware that doesn't
+        # expose per-float state over the local protocol, so the entity reads
+        # "unknown" rather than a fabricated value.
         data = self._sensor
-        return None if data is None else data.get("triggered")
+        triggered = None if data is None else data.get("triggered")
+        return None if triggered is None else (not triggered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self._sensor or {}
-        attrs: dict[str, Any] = {"sensor_number": data.get("number")}
-        if data.get("triggered") is None:
+        triggered = data.get("triggered")
+        attrs: dict[str, Any] = {
+            "sensor_number": data.get("number"),
+            "wet": triggered,
+        }
+        if triggered is None:
             attrs["live_state"] = "not reported by this controller firmware"
         return attrs
 

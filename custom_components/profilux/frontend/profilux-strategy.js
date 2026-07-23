@@ -8,8 +8,16 @@
  *   strategy:
  *     type: custom:profilux
  *
- * Sensors become gauges, power sockets become outlet tiles, per-socket current
- * sensors get their own row, and level/alarm binary sensors get a status row.
+ * Layout (a "sections" view, two columns wide):
+ *   1. Controller alarm            — full width, at the very top
+ *   2. Sensors (left) | Power (right)
+ *   3. Switching channels          — socket cards (name + state colour + power)
+ *   4. Level control loops         — loop cards (name + state colour)
+ *   5. Dosing pumps                — reservoir fill level
+ *
+ * Socket and loop cards behave like area cards: the face shows the name, a
+ * state-coloured icon and (for sockets) the current power draw; tapping opens
+ * the more-info dialog with the toggle and the detailed attributes.
  */
 
 // Gauge ranges keyed by unit of measurement.
@@ -36,17 +44,11 @@ class ProfiluxDashboardStrategy {
       (id) => isSensor(id) && !/_(current|power|status)$/.test(id) && !/_fill_level$/.test(id)
     );
     const dosing = ids.filter((id) => isSensor(id) && /_fill_level$/.test(id));
-    // Power/current: totals first, then per-socket currents.
-    const power = ids
-      .filter((id) => isSensor(id) && /_(current|power)$/.test(id))
-      .sort((a, b) => (b.includes("total") ? 1 : 0) - (a.includes("total") ? 1 : 0));
     const totalPower = ids.find((id) => id.endsWith("_total_power"));
+    const totalCurrent = ids.find((id) => id.endsWith("_total_current"));
     const status = ids.filter((id) => isSensor(id) && id.endsWith("_status"));
     const alarms = ids.filter(
       (id) => id.startsWith("binary_sensor.") && id.endsWith("_alarm")
-    );
-    const floats = ids.filter(
-      (id) => id.startsWith("binary_sensor.") && /_(min|max)_float$/.test(id)
     );
     const socketSensors = ids.filter(
       (id) =>
@@ -54,25 +56,27 @@ class ProfiluxDashboardStrategy {
         !id.endsWith("_alarm") &&
         !/_(min|max)_float$/.test(id)
     );
-    // Prefer the controllable switch entity (tap-to-toggle) over the read-only
-    // status sensor when socket control is enabled and a switch exists. Match by
-    // the socket name (everything after the domain + "…profilux_"), because the
-    // switch and binary_sensor can carry different entity-id prefixes (e.g. one
-    // created before the device gained an area name).
+
+    // Match a switch and its status binary_sensor by the socket/loop name
+    // (everything after the domain + "…profilux_"), because the two can carry
+    // different entity-id prefixes (e.g. one created before the device gained an
+    // area name).
     const socketName = (id) => id.replace(/^.*?profilux_/, "");
-    // The controller-wide alarm's name is just "alarm"; the per-loop alarms are
+    // The controller-wide alarm's name is just "alarm"; per-loop alarms are
     // "<loop>_alarm". Pull the controller alarm out to pin it at the top.
     const controllerAlarm = alarms.find((id) => socketName(id) === "alarm");
     const levelAlarms = alarms.filter((id) => id !== controllerAlarm);
     const switches = ids.filter((id) => id.startsWith("switch."));
+
+    // Prefer the controllable switch (tap-to-toggle) over the read-only status
+    // sensor when a switch exists for the same socket.
     const sockets = socketSensors.map((bs) => {
       const name = socketName(bs);
-      const sw = switches.find((s) => socketName(s) === name);
-      return sw || bs;
+      return switches.find((s) => socketName(s) === name) || bs;
     });
 
-    const totalCurrent = ids.find((id) => id.endsWith("_total_current"));
-    const socketCurrents = power.filter((id) => !id.includes("total"));
+    // --- card builders --------------------------------------------------
+    const heading = (h, icon) => ({ type: "heading", heading: h, icon });
 
     const gaugeCard = (id) => {
       const unit = stateOf(id) ? stateOf(id).attributes.unit_of_measurement : undefined;
@@ -84,55 +88,56 @@ class ProfiluxDashboardStrategy {
       if (unit) card.unit = unit;
       return card;
     };
-    // Tapping a socket opens its more-info dialog (toggle + the current/power
-    // attributes on the switch); the icon still toggles for a quick switch.
+
+    // A socket card: name + state-coloured icon + current draw on the face; the
+    // toggle and per-outlet power live in the tap-to-open more-info dialog.
     const socketCard = (id) => ({
       type: "tile",
       entity: id,
       icon: "mdi:power-socket-de",
       color: "amber",
+      state_content: id.startsWith("switch.") ? ["state", "power_w"] : ["state", "current_a"],
       grid_options: { columns: 4 },
     });
+
     const tile = (id, columns, extra) => ({
       type: "tile",
       entity: id,
       grid_options: { columns },
       ...(extra || {}),
     });
-    const heading = (heading, icon) => ({ type: "heading", heading, icon });
-    const subheading = (heading) => ({ type: "heading", heading_style: "subtitle", heading });
 
     const sections = [];
 
-    // Controller alarm — pinned at the very top of the dashboard.
+    // 1. Controller alarm — full width, at the very top.
     if (controllerAlarm) {
       sections.push({
         type: "grid",
+        column_span: 2,
         cards: [
           {
             type: "tile",
             entity: controllerAlarm,
             name: "Controller Alarm",
             icon: "mdi:alert",
-            color: "red",
             grid_options: { columns: "full" },
           },
         ],
       });
     }
 
-    // Sensors — gauges, two per row.
+    // 2a. Sensors — gauges, in the left column.
     if (gauges.length) {
       sections.push({
         type: "grid",
+        column_span: 1,
         cards: [heading("Sensoren", "mdi:gauge"), ...gauges.map(gaugeCard)],
       });
     }
 
-    // Power & current — overall draw only. Per-socket current lives in each
-    // socket's more-info dialog (as switch attributes), not on the main page.
+    // 2b. Power & current — in the right column, with a 24 h trend.
     if (totalPower || totalCurrent) {
-      const cards = [heading("Leistung & Stromaufnahme", "mdi:flash")];
+      const cards = [heading("Stromverbrauch", "mdi:flash")];
       if (totalPower) cards.push(tile(totalPower, 6, { color: "orange", icon: "mdi:flash" }));
       if (totalCurrent) cards.push(tile(totalCurrent, 6, { color: "orange", icon: "mdi:current-ac" }));
       if (totalPower) {
@@ -143,58 +148,62 @@ class ProfiluxDashboardStrategy {
           grid_options: { columns: "full", rows: 4 },
         });
       }
-      sections.push({ type: "grid", cards });
+      sections.push({ type: "grid", column_span: 1, cards });
     }
 
-    // Switching channels — outlet tiles.
+    // 3. Switching channels — socket cards, full width.
     if (sockets.length) {
       sections.push({
         type: "grid",
+        column_span: 2,
         cards: [heading("Schaltkanäle", "mdi:power-socket-de"), ...sockets.map(socketCard)],
       });
     }
 
-    // Dosing pumps — reservoir fill level.
-    if (dosing.length) {
+    // 4. Level control loops — one card per loop, coloured by its alarm state
+    // (red = fault, e.g. a dry float; green/neutral = OK). Tapping opens the
+    // loop's more-info dialog, which lists the sensors assigned to the loop.
+    const loopKey = (id) =>
+      socketName(id).replace(/_(status|alarm|min_float|max_float)$/, "");
+    const loopNames = [...new Set([...levelAlarms, ...status].map(loopKey))];
+    if (loopNames.length) {
+      const loopCards = loopNames.map((nm) => {
+        const alarm = levelAlarms.find((id) => loopKey(id) === nm);
+        const stat = status.find((id) => loopKey(id) === nm);
+        const primary = alarm || stat;
+        const friendly = stateOf(primary)?.attributes.friendly_name || nm;
+        const name = friendly.replace(/\s+(alarm|status)$/i, "");
+        return {
+          type: "tile",
+          entity: primary,
+          name,
+          icon: "mdi:waves",
+          grid_options: { columns: 4 },
+        };
+      });
       sections.push({
         type: "grid",
-        cards: [
-          heading("Dosierpumpen", "mdi:cup-water"),
-          ...dosing.map((id) => tile(id, 6, {
-            color: "light-blue",
-            icon: "mdi:cup-water",
-            state_content: ["state", "percent"],
-          })),
-        ],
+        column_span: 2,
+        cards: [heading("Niveau-Regelkreise", "mdi:water-percent"), ...loopCards],
       });
     }
 
-    // Level loops — per loop: status, its min/max floats, then its alarm. Match
-    // floats/alarms to a loop by name (robust to differing id prefixes).
-    if (status.length || levelAlarms.length || floats.length) {
-      const cards = [heading("Niveau & Alarm", "mdi:water-percent")];
-      const loopName = (id) =>
-        socketName(id).replace(/_(status|alarm|min_float|max_float)$/, "");
-      const paired = new Set();
-      for (const st of status) {
-        const loop = loopName(st);
-        cards.push(tile(st, 12, { icon: "mdi:waves" }));
-        for (const f of floats.filter((id) => loopName(id) === loop)) {
-          cards.push(tile(f, 6));
-          paired.add(f);
-        }
-        for (const a of levelAlarms.filter((id) => loopName(id) === loop)) {
-          cards.push(tile(a, 6, { icon: "mdi:water-alert" }));
-          paired.add(a);
-        }
-      }
-      // Any floats/alarms not tied to a status loop.
-      cards.push(
-        ...[...floats, ...levelAlarms]
-          .filter((id) => !paired.has(id))
-          .map((id) => tile(id, 6))
-      );
-      sections.push({ type: "grid", cards });
+    // 5. Dosing pumps — reservoir fill level, full width.
+    if (dosing.length) {
+      sections.push({
+        type: "grid",
+        column_span: 2,
+        cards: [
+          heading("Dosierpumpen", "mdi:cup-water"),
+          ...dosing.map((id) =>
+            tile(id, 6, {
+              color: "light-blue",
+              icon: "mdi:cup-water",
+              state_content: ["state", "percent"],
+            })
+          ),
+        ],
+      });
     }
 
     return {
@@ -205,7 +214,7 @@ class ProfiluxDashboardStrategy {
           path: "aquarium",
           type: "sections",
           icon: "mdi:fishbowl",
-          max_columns: 3,
+          max_columns: 2,
           sections,
         },
       ],
