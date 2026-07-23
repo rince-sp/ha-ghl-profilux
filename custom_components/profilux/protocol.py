@@ -971,6 +971,36 @@ def read_range(
         return transport.get_many_int(list(range(start, end + 1)), signed=False)
 
 
+def scan_range(
+    host: str,
+    username: str,
+    password: str,
+    start: int,
+    end: int,
+    interface: str = INTERFACE_WEBSOCKET,
+    repeat: int = 2,
+) -> dict[int, int]:
+    """Read every code in a range **individually** (each via the retrying single
+    read), ``repeat`` times, and return only codes that answered with the *same*
+    value on every pass.
+
+    Unlike ``read_range`` (a batch read, where the controller silently skips the
+    odd code so a constant can look like it "disappeared"), this reads one code
+    at a time and keeps only stable answers — so diffing two scans (e.g. a float
+    dry vs. wet) reliably reveals the register that actually changed, without the
+    batch read's drop-out noise. Slower, so keep the range modest.
+    """
+    with make_transport(interface, host, username, password) as transport:
+        ctrl = Controller(transport)
+        stable: dict[int, int] = {}
+        for code in range(start, end + 1):
+            vals = [ctrl._get_int(code, signed=False) for _ in range(max(1, repeat))]
+            first = vals[0]
+            if first is not None and all(v == first for v in vals):
+                stable[code] = first
+        return stable
+
+
 def write_and_verify(
     host: str,
     username: str,
