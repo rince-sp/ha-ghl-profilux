@@ -18,19 +18,27 @@ The WebSocket interface additionally needs:  pip install "websocket-client>=1.6.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import sys
 
-# Allow running straight from the repo without installing anything.
-sys.path.insert(0, "custom_components/profilux")
-
-from protocol import (  # noqa: E402
-    INTERFACE_HTTP,
-    INTERFACE_WEBSOCKET,
-    ProfiluxError,
-    diagnostic,
-    fetch_all,
+# Load protocol.py directly by path — do NOT put custom_components/profilux on
+# sys.path, or its sibling modules (e.g. select.py) would shadow same-named
+# standard-library modules (select) that the protocol's own imports pull in.
+_PROTOCOL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "custom_components", "profilux", "protocol.py",
 )
+_spec = importlib.util.spec_from_file_location("profilux_protocol", _PROTOCOL_PATH)
+protocol = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(protocol)
+
+INTERFACE_HTTP = protocol.INTERFACE_HTTP
+INTERFACE_WEBSOCKET = protocol.INTERFACE_WEBSOCKET
+ProfiluxError = protocol.ProfiluxError
+diagnostic = protocol.diagnostic
+fetch_all = protocol.fetch_all
 
 
 def _try(host: str, user: str, password: str, interface: str, read_names: bool):
@@ -77,11 +85,9 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.read is not None:
-        from protocol import read_code  # noqa: E402, PLC0415
-
         iface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface
         try:
-            val = read_code(args.host, args.username, args.password, args.read, interface=iface)
+            val = protocol.read_code(args.host, args.username, args.password, args.read, interface=iface)
         except ProfiluxError as err:
             print(f"ERROR: {err}", file=sys.stderr)
             return 1
@@ -89,8 +95,6 @@ def main() -> int:
         return 0
 
     if args.write:
-        from protocol import write_and_verify  # noqa: E402, PLC0415
-
         code, value = int(args.write[0]), int(args.write[1])
         print("⚠️  WRITE MODE — this changes the controller and can switch live")
         print(f"    aquarium equipment. code={code} value={value} bytes={args.bytes} "
@@ -100,7 +104,7 @@ def main() -> int:
                 print("Aborted.")
                 return 1
         try:
-            res = write_and_verify(
+            res = protocol.write_and_verify(
                 args.host, args.username, args.password, code, value,
                 interface=INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface,
                 nbytes=args.bytes, save=args.save, verify_code=args.verify,
