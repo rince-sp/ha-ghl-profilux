@@ -5,6 +5,34 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-07-31
+
+### Added
+- **GHL API interface (new, recommended).** Alongside the existing raw SWMBus
+  transports (WebSocket / HTTP), the integration can now talk the **documented
+  GHL API** — the plain-text `GET`/`SET` protocol GHL published for ProfiLux
+  firmware 7.31+. Pick it in the config flow ("Interface: GHL API", default port
+  10002). It must be enabled on the controller first (**System → GHL API** in GHL
+  Control Center / GHL Connect; it is off by default and after every firmware
+  update).
+- **True per-sensor level states.** In API mode each level sensor is read
+  individually (`GET LEVELSENSOR[i] ACTSTATE`) with its own name and exposed as a
+  binary sensor — **wet = OK (green), dry = fault (red)** — instead of the
+  loop-level guess the raw registers only allow.
+- **KH Director, ION Director and flow sensors.** API mode surfaces the KH
+  Director value, up to five ION Director values (e.g. calcium, magnesium) and
+  flow sensors as additional sensors.
+- Standalone `scraper.py` gains `--api-cmd "GET SENSOR[0] ACTVALUE"` to send a
+  single GHL API line (with `--api-port`), handy for enabling/verifying the API.
+
+### Notes
+- **Socket on/off control stays SWMBus-only.** The GHL API is read-only for
+  outputs by design ("a network outage must never leave a tank unheated"), so in
+  API mode sockets are read-only status. To switch sockets, use the WebSocket /
+  HTTP interface, which keeps the on/off switch and Auto/On/Off select.
+- API mode reads no model/serial/firmware (the API exposes none), so the device
+  is identified by its host.
+
 ## [1.9.0] - 2026-07-23
 
 ### Fixed
@@ -207,6 +235,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.0.0
 [1.9.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.9.0
 [1.8.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.8.0
 [1.7.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.7.1

@@ -42,6 +42,11 @@ async def async_setup_entry(
                 yield ("level_float", level["index"], sensor["role"]), (
                     lambda i=level["index"], r=sensor["role"]: ProfiluxLevelFloat(coordinator, i, r)
                 )
+        # Individual level sensors (GHL API mode: real per-sensor wet/dry state).
+        for lvs in data.get("level_sensors", []):
+            yield ("level_sensor", lvs["index"]), (
+                lambda i=lvs["index"]: ProfiluxLevelSensor(coordinator, i)
+            )
         if data.get("alarm") is not None:
             yield ("alarm",), (lambda: ProfiluxAlarm(coordinator))
         if data.get("level_fault") is not None:
@@ -193,6 +198,51 @@ class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
     @property
     def available(self) -> bool:
         return super().available and self._sensor is not None
+
+
+class ProfiluxLevelSensor(ProfiluxEntity, BinarySensorEntity):
+    """One individual level sensor (GHL API), wet = good / dry = fault.
+
+    Modelled as a PROBLEM sensor so a dry sensor shows red and a submerged one
+    shows green/neutral, matching the controller's own semantics.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:waves"
+
+    def __init__(self, coordinator: ProfiluxCoordinator, index: int) -> None:
+        super().__init__(coordinator)
+        self._index = index
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_level_sensor_{index}"
+
+    @property
+    def _data(self) -> dict[str, Any] | None:
+        for lvs in (self.coordinator.data or {}).get("level_sensors", []):
+            if lvs["index"] == self._index:
+                return lvs
+        return None
+
+    @property
+    def name(self) -> str | None:
+        data = self._data or {}
+        return data.get("name") or f"Level sensor {self._index + 1}"
+
+    @property
+    def is_on(self) -> bool | None:
+        # PROBLEM = dry. `wet` True → submerged → OK (off).
+        data = self._data
+        if data is None or data.get("wet") is None:
+            return None
+        return not data["wet"]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._data or {}
+        return {"wet": data.get("wet"), "raw_state": data.get("state")}
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._data is not None
 
 
 class ProfiluxAlarm(ProfiluxEntity, BinarySensorEntity):

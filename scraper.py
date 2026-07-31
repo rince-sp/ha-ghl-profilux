@@ -109,7 +109,34 @@ def main() -> int:
         help="Decode captured raw SWMBus/WebSocket frames (hex, from browser dev tools) "
         "into (code -> value) pairs; '-' reads hex from stdin",
     )
+    parser.add_argument(
+        "--api-cmd",
+        metavar="COMMAND",
+        default=None,
+        help='Send one GHL API line and print the reply, e.g. --api-cmd "GET SENSOR[0] ACTVALUE" '
+        "(the API must be enabled on the controller under System -> GHL API)",
+    )
+    parser.add_argument(
+        "--api-port", type=int, default=10002, help="TCP port for the GHL API (default 10002)"
+    )
     args = parser.parse_args()
+
+    if args.api_cmd is not None:
+        import socket as _socket
+        try:
+            with _socket.create_connection((args.host, args.api_port), 10) as sock:
+                sock.sendall((args.api_cmd + "\n").encode("latin-1", "ignore"))
+                buf = b""
+                while b"\n" not in buf and len(buf) < 1024:
+                    chunk = sock.recv(256)
+                    if not chunk:
+                        break
+                    buf += chunk
+        except OSError as err:
+            print(f"ERROR: cannot reach GHL API at {args.host}:{args.api_port}: {err}", file=sys.stderr)
+            return 1
+        print(buf.decode("latin-1", "ignore").strip())
+        return 0
 
     if args.decode is not None:
         import re

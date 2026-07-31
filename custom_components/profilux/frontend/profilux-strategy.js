@@ -51,11 +51,16 @@ class ProfiluxDashboardStrategy {
       (id) => id.startsWith("binary_sensor.") && id.endsWith("_alarm")
     );
     const levelFault = ids.find((id) => id.endsWith("_level_fault"));
+    // Individual level sensors (GHL API mode).
+    const levelSensors = ids.filter(
+      (id) => id.startsWith("binary_sensor.") && /_level_sensor_\d+$/.test(id)
+    );
     const socketSensors = ids.filter(
       (id) =>
         id.startsWith("binary_sensor.") &&
         !id.endsWith("_alarm") &&
         !id.endsWith("_level_fault") &&
+        !/_level_sensor_\d+$/.test(id) &&
         !/_(min|max)_float$/.test(id)
     );
 
@@ -168,7 +173,7 @@ class ProfiluxDashboardStrategy {
     const loopKey = (id) =>
       socketName(id).replace(/_(status|alarm|min_float|max_float)$/, "");
     const loopNames = [...new Set([...levelAlarms, ...status].map(loopKey))];
-    if (loopNames.length || levelFault) {
+    if (loopNames.length || levelFault || levelSensors.length) {
       const cards = [heading("Niveau-Regelkreise", "mdi:water-percent")];
       // Controller-wide level fault first: green when all floats are wet, red
       // when any is dry.
@@ -180,6 +185,10 @@ class ProfiluxDashboardStrategy {
           icon: "mdi:water-check",
           grid_options: { columns: "full" },
         });
+      }
+      // Individual level sensors (GHL API): one tap-to-detail card each.
+      for (const id of levelSensors) {
+        cards.push({ type: "tile", entity: id, icon: "mdi:waves", grid_options: { columns: 4 } });
       }
       const loopCards = loopNames.map((nm) => {
         const alarm = levelAlarms.find((id) => loopKey(id) === nm);

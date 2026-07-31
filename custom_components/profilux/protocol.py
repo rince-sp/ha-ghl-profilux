@@ -33,7 +33,8 @@ _LOGGER = logging.getLogger(__name__)
 
 INTERFACE_HTTP = "http"
 INTERFACE_WEBSOCKET = "websocket"
-INTERFACES = [INTERFACE_HTTP, INTERFACE_WEBSOCKET]
+INTERFACE_API = "ghl_api"        # the documented GHL API (text GET/SET), see api.py
+INTERFACES = [INTERFACE_HTTP, INTERFACE_WEBSOCKET, INTERFACE_API]
 
 # --- Code map (subset we need) -------------------------------------------
 CODE_SOFTWAREVERSION = 0
@@ -947,17 +948,34 @@ def fetch_all(
     password: str,
     interface: str = INTERFACE_HTTP,
     read_names: bool = True,
+    port: int = 10002,
 ) -> dict[str, Any]:
     """Read device info, every populated sensor, and every socket.
 
     Raises :class:`ProfiluxError` on connection/auth failure.
     """
+    if interface == INTERFACE_API:
+        from .api import ApiController, GhlApiClient
+
+        with GhlApiClient(host, port) as client:
+            return ApiController(client, read_names=read_names).snapshot()
     with make_transport(interface, host, username, password) as transport:
         return Controller(transport, read_names=read_names).snapshot()
 
 
-def test_connection(host: str, username: str, password: str, interface: str = INTERFACE_HTTP) -> None:
+def test_connection(
+    host: str,
+    username: str,
+    password: str,
+    interface: str = INTERFACE_HTTP,
+    port: int = 10002,
+) -> None:
     """Lightweight reachability/auth check for the config flow."""
+    if interface == INTERFACE_API:
+        from .api import api_test_connection
+
+        api_test_connection(host, port)
+        return
     with make_transport(interface, host, username, password) as transport:
         if Controller(transport)._get_int(CODE_GET_SENSOR_COUNT, signed=False) is None:
             raise ProfiluxError("connected but received no valid response")

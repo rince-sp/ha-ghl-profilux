@@ -10,8 +10,9 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_INTERFACE, DOMAIN, SCAN_INTERVAL
+from .const import CONF_INTERFACE, CONF_PORT, DEFAULT_API_PORT, DOMAIN, SCAN_INTERVAL
 from .protocol import (
+    INTERFACE_API,
     INTERFACE_HTTP,
     SOCKET_FUNCTION_ALWAYS_OFF,
     SOCKET_FUNCTION_ALWAYS_ON,
@@ -39,14 +40,26 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._username = entry.data.get(CONF_USERNAME, "")
         self._password = entry.data.get(CONF_PASSWORD, "")
         self._interface = entry.data.get(CONF_INTERFACE, INTERFACE_HTTP)
+        self._port = entry.data.get(CONF_PORT, DEFAULT_API_PORT)
         # Remembered "automatic" Function per socket, so control can be handed
         # back to the controller after a manual on/off override.
         self._auto_functions: dict[int, int] = {}
 
+    @property
+    def supports_socket_control(self) -> bool:
+        """Socket on/off is a raw-SWMBus feature; the GHL API can't switch."""
+        return self._interface != INTERFACE_API
+
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             data = await self.hass.async_add_executor_job(
-                fetch_all, self._host, self._username, self._password, self._interface
+                fetch_all,
+                self._host,
+                self._username,
+                self._password,
+                self._interface,
+                True,
+                self._port,
             )
         except ProfiluxError as err:
             raise UpdateFailed(str(err)) from err

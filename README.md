@@ -43,17 +43,43 @@ automatic Function is known).
 
 ## How it talks to the controller
 
-Every value on a ProfiLux is addressed by a numeric *code*. There are two local
-ways to read those codes, and both are supported:
+The integration supports three local interfaces, selectable in the config flow:
 
 | Interface | Transport | Use for |
 |-----------|-----------|---------|
+| `ghl_api` | the **documented GHL API** — plain-text `GET`/`SET` over TCP (default port 10002) | ProfiLux 4 firmware **7.31+** (recommended) |
 | `websocket` | raw SWMBus frames over `ws://<host>/ws` | ProfiLux 4 (fw 7.x), ProfiLux mini |
 | `http` | `GET http://<host>/communication.php?dir=enq&code=<code>` → `command=<code>&data=<value>` | older ProfiLux 3 / 4 firmware that still serves `communication.php` |
 
-Pick the one your controller answers on — the bundled `scraper.py` auto-detects
-it. Recent ProfiLux 4 firmware (e.g. 7.49) drops `communication.php` (returns
-404) and only speaks WebSocket, so use `websocket` there.
+### GHL API (recommended)
+
+GHL published an [official local API](https://www.aquariumcomputer.com/de/software/ghl-api/)
+for ProfiLux firmware 7.31+ — a simple, documented text protocol. Prefer it:
+it reads cleanly and exposes things the raw registers don't, including **each
+level sensor's individual wet/dry state**, the **KH Director**, up to five
+**ION Director** values, and **flow sensors** — all under the names you gave them.
+
+- **Enable it first.** The API is **off by default** (and after every firmware
+  update). Turn it on under **System → GHL API** in GHL Control Center or GHL
+  Connect. **Read access is enough** for this integration.
+- **Read-only for outputs by design.** The API cannot switch outlets ("a network
+  outage must never leave a tank unheated"), so **socket on/off control is not
+  available in API mode** — use the `websocket` / `http` interface for that.
+- No username/password (the API has none — your network is the perimeter; keep
+  the device on a trusted LAN and don't forward port 10002 through your router).
+- Verify/enable it from the LAN with the bundled scraper:
+  ```bash
+  python scraper.py 192.168.1.50 --api-cmd "GET SENSOR[0] ACTVALUE"
+  # -> ACK <24.412>   (NACK (-105) means the API is still switched off)
+  ```
+
+### Raw SWMBus (`websocket` / `http`)
+
+Every value on a ProfiLux is also addressable by a numeric *code* over the raw
+SWMBus protocol. Pick the one your controller answers on — the bundled
+`scraper.py` auto-detects it. Recent ProfiLux 4 firmware (e.g. 7.49) drops
+`communication.php` (returns 404) and only speaks WebSocket, so use `websocket`
+there. These interfaces additionally support **socket on/off control**.
 
 The GHL code map and block-offset addressing were cross-checked against
 [`cjburchell/profilux-go`](https://github.com/cjburchell/profilux-go); the

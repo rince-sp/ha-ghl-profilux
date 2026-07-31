@@ -10,6 +10,11 @@ MANUFACTURER = "GHL"
 
 CONF_INTERFACE = "interface"
 
+# Port for the GHL API (text protocol) interface. Ignored by the SWMBus
+# (websocket/http) interfaces, which use their own fixed paths.
+CONF_PORT = "port"
+DEFAULT_API_PORT = 10002
+
 # Opt-in socket control. Off by default: enabling it exposes a switch per socket
 # that *writes* to the controller (forcing "always on" / "always off"), which
 # can override the automatic control of live aquarium equipment.
