@@ -33,7 +33,8 @@ _LOGGER = logging.getLogger(__name__)
 
 INTERFACE_HTTP = "http"
 INTERFACE_WEBSOCKET = "websocket"
-INTERFACES = [INTERFACE_HTTP, INTERFACE_WEBSOCKET]
+INTERFACE_API = "ghl_api"        # the documented GHL API (text GET/SET), see api.py
+INTERFACES = [INTERFACE_HTTP, INTERFACE_WEBSOCKET, INTERFACE_API]
 
 # --- Code map (subset we need) -------------------------------------------
 CODE_SOFTWAREVERSION = 0
@@ -102,6 +103,11 @@ DOSING_MODES = {0: "Aus", 1: "Dauerlauf", 2: "Automatische Zeiten", 3: "Individu
 # Digital inputs (float switches feed the level loops)
 CODE_DIGITAL_INPUTS_STATE = 10091  # bitmask of all digital input states
 CODE_GET_DIGITAL_INPUT_COUNT = 10505
+# Global level-sensor fault flag: 0 while every level float is submerged (wet),
+# non-zero (0xFF) as soon as any level float goes dry. Confirmed by reliable
+# per-code scans (dry vs. wet) — it is a controller-wide flag, not a per-sensor
+# bitmask, so it tells us "all wet" vs. "at least one dry", not which one.
+CODE_LEVEL_FAULT = 10089
 
 CODE_GET_SENSOR_COUNT = 10500
 CODE_GET_SWITCH_COUNT = 10501
@@ -814,7 +820,20 @@ class Controller:
         raw = self._get_int(CODE_IS_ALARM, signed=False)
         return None if raw is None else raw != 0
 
-    def levels(self) -> list[dict[str, Any]]:
+    def level_fault(self) -> int | None:
+        """Global level-sensor fault flag (0 = all floats wet, non-zero = a dry
+        float somewhere). See ``CODE_LEVEL_FAULT``."""
+        return self._get_int(CODE_LEVEL_FAULT, signed=False)
+
+    def levels(self, fault: int | None = -1) -> list[dict[str, Any]]:
+        # ``fault`` defaults to the sentinel -1 meaning "read it here"; the
+        # snapshot passes the value it already read so we don't read twice.
+        if fault == -1:
+            fault = self.level_fault()
+        # When the global fault flag is a known 0, *no* level float is dry, so
+        # every assigned float is certainly wet. When it is non-zero (a dry float
+        # exists) we can't tell which one from this flag, so those stay unknown.
+        all_wet = fault == 0
         idxs = list(range(MAX_LEVELS))
         state_code = {i: CODE_LEVEL_STATE + _block_offset(i, 3, 1) for i in idxs}
         states = self._t.get_many_int(list(state_code.values()), signed=False)
@@ -831,7 +850,6 @@ class Controller:
         prop_code = {i: CODE_LEVEL_CTRL_PROPS + i * MEGA_BLOCK_SIZE for i in idxs}
         sources = self._t.get_many_int(list(src_code.values()), signed=False)
         props = self._t.get_many_int(list(prop_code.values()), signed=False)
-        di_mask = self._get_int(CODE_DIGITAL_INPUTS_STATE, signed=False)
 
         present = [i for i in idxs if state_code[i] in states or names.get(name_code[i])]
         result: list[dict[str, Any]] = []
@@ -856,14 +874,17 @@ class Controller:
                 src = sources.get(src_code[(i, sub)])
                 if src is None:
                     continue
-                number = (src >> 4) + 1  # 1-based float-sensor / digital-input number
+                number = (src >> 4) + 1  # 1-based level-sensor input number
                 if number in seen:
                     continue  # single-sensor loop: both sub-controls point at one sensor
                 seen.add(number)
-                # A float sitting in water reads the input bit as 0 on this
-                # controller, so "wet" is the *cleared* bit (moisture = not bit).
-                bit = None if di_mask is None else bool((di_mask >> (number - 1)) & 1)
-                triggered = None if bit is None else not bit
+                # Per-float live state isn't individually exposed by this
+                # firmware (the digital-input mask reads a constant 0; the floats
+                # are a separate LEVELSENSORINPUT namespace). But the global fault
+                # flag lets us be certain in the common case: when it is 0, every
+                # float is wet. When a dry float exists we can't say which, so it
+                # stays unknown. The confirmed sensor number is always reported.
+                triggered = True if all_wet else None
                 sensors.append({"role": role, "number": number, "triggered": triggered})
 
             result.append(
@@ -909,12 +930,14 @@ class Controller:
         return False
 
     def snapshot(self) -> dict[str, Any]:
+        fault = self.level_fault()
         return {
             "device": self.device_info(),
             "alarm": self.alarm(),
             "sensors": self.sensors(0),
             "sockets": self.sockets(0),
-            "levels": self.levels(),
+            "levels": self.levels(fault=fault),
+            "level_fault": None if fault is None else bool(fault),
             "dosing_pumps": self.dosing_pumps(),
         }
 
@@ -925,17 +948,36 @@ def fetch_all(
     password: str,
     interface: str = INTERFACE_HTTP,
     read_names: bool = True,
+    port: int = 10002,
 ) -> dict[str, Any]:
     """Read device info, every populated sensor, and every socket.
 
     Raises :class:`ProfiluxError` on connection/auth failure.
     """
+    if interface == INTERFACE_API:
+        # The integration talks the GHL API over its WebSocket (up to 25 clients),
+        # which is far more robust for polling than the single-client TCP port.
+        from .api import ApiController, GhlApiWsClient
+
+        with GhlApiWsClient(host) as client:
+            return ApiController(client, read_names=read_names).snapshot()
     with make_transport(interface, host, username, password) as transport:
         return Controller(transport, read_names=read_names).snapshot()
 
 
-def test_connection(host: str, username: str, password: str, interface: str = INTERFACE_HTTP) -> None:
+def test_connection(
+    host: str,
+    username: str,
+    password: str,
+    interface: str = INTERFACE_HTTP,
+    port: int = 10002,
+) -> None:
     """Lightweight reachability/auth check for the config flow."""
+    if interface == INTERFACE_API:
+        from .api import api_test_connection
+
+        api_test_connection(host)
+        return
     with make_transport(interface, host, username, password) as transport:
         if Controller(transport)._get_int(CODE_GET_SENSOR_COUNT, signed=False) is None:
             raise ProfiluxError("connected but received no valid response")
@@ -966,6 +1008,36 @@ def read_range(
     diffing two captures (e.g. a float sensor wet vs. dry)."""
     with make_transport(interface, host, username, password) as transport:
         return transport.get_many_int(list(range(start, end + 1)), signed=False)
+
+
+def scan_range(
+    host: str,
+    username: str,
+    password: str,
+    start: int,
+    end: int,
+    interface: str = INTERFACE_WEBSOCKET,
+    repeat: int = 2,
+) -> dict[int, int]:
+    """Read every code in a range **individually** (each via the retrying single
+    read), ``repeat`` times, and return only codes that answered with the *same*
+    value on every pass.
+
+    Unlike ``read_range`` (a batch read, where the controller silently skips the
+    odd code so a constant can look like it "disappeared"), this reads one code
+    at a time and keeps only stable answers — so diffing two scans (e.g. a float
+    dry vs. wet) reliably reveals the register that actually changed, without the
+    batch read's drop-out noise. Slower, so keep the range modest.
+    """
+    with make_transport(interface, host, username, password) as transport:
+        ctrl = Controller(transport)
+        stable: dict[int, int] = {}
+        for code in range(start, end + 1):
+            vals = [ctrl._get_int(code, signed=False) for _ in range(max(1, repeat))]
+            first = vals[0]
+            if first is not None and all(v == first for v in vals):
+                stable[code] = first
+        return stable
 
 
 def write_and_verify(

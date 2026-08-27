@@ -90,7 +90,134 @@ def main() -> int:
         metavar=("START", "END"),
         help="Read a code range and print every non-zero value (for diffing two captures)",
     )
+    parser.add_argument(
+        "--scan",
+        nargs=2,
+        type=int,
+        default=None,
+        metavar=("START", "END"),
+        help="Reliably read a code range one code at a time (each confirmed stable), "
+        "immune to the batch read's drop-outs — best for diffing a float dry vs. wet",
+    )
+    parser.add_argument(
+        "--repeat", type=int, default=2, help="Passes per code for --scan (default 2)"
+    )
+    parser.add_argument(
+        "--decode",
+        metavar="HEXFILE",
+        default=None,
+        help="Decode captured raw SWMBus/WebSocket frames (hex, from browser dev tools) "
+        "into (code -> value) pairs; '-' reads hex from stdin",
+    )
+    parser.add_argument(
+        "--api-cmd",
+        metavar="COMMAND",
+        default=None,
+        help='Send one GHL API line and print the reply, e.g. --api-cmd "GET SENSOR[0] ACTVALUE" '
+        "(the API must be enabled on the controller under System -> GHL API)",
+    )
+    parser.add_argument(
+        "--api-port", type=int, default=10002, help="TCP port for the GHL API (default 10002)"
+    )
+    parser.add_argument(
+        "--api-ws",
+        action="store_true",
+        help="Send --api-cmd over the GHL API WebSocket (ws://host/ghl-api/) instead of TCP — "
+        "this is the transport the integration uses (needs websocket-client)",
+    )
     args = parser.parse_args()
+
+    if args.api_cmd is not None and args.api_ws:
+        # Talk the GHL API over its WebSocket: skip the two greeting lines, send
+        # the command as a text frame (no newline), read the reply, ignore the
+        # duplicate. This mirrors the integration's transport exactly.
+        try:
+            import websocket
+        except ImportError:
+            print("ERROR: --api-ws needs websocket-client (pip install websocket-client)", file=sys.stderr)
+            return 1
+        url = f"ws://{args.host}/ghl-api/"
+        try:
+            ws = websocket.create_connection(url, timeout=10)
+            ws.settimeout(1.0)
+            for _ in range(10):  # drain greetings
+                try:
+                    ws.recv()
+                except Exception:
+                    break
+            ws.settimeout(5.0)
+            ws.send(args.api_cmd)
+            reply = ""
+            for _ in range(12):
+                frame = ws.recv()
+                if isinstance(frame, bytes):
+                    frame = frame.decode("latin-1", "ignore")
+                if frame.strip().startswith(("ACK", "NACK")):
+                    reply = frame.strip()
+                    break
+            ws.close()
+        except Exception as err:  # noqa: BLE001
+            print(f"ERROR: GHL API WebSocket {url}: {err}", file=sys.stderr)
+            return 1
+        print(reply or "(no ACK/NACK reply)")
+        return 0
+
+    if args.api_cmd is not None:
+        import socket as _socket
+        try:
+            with _socket.create_connection((args.host, args.api_port), 10) as sock:
+                sock.sendall((args.api_cmd + "\n").encode("latin-1", "ignore"))
+                buf = b""
+                while b"\n" not in buf and len(buf) < 1024:
+                    chunk = sock.recv(256)
+                    if not chunk:
+                        break
+                    buf += chunk
+        except OSError as err:
+            print(f"ERROR: cannot reach GHL API at {args.host}:{args.api_port}: {err}", file=sys.stderr)
+            return 1
+        print(buf.decode("latin-1", "ignore").strip())
+        return 0
+
+    if args.decode is not None:
+        import re
+        raw = sys.stdin.read() if args.decode == "-" else open(args.decode).read()
+        hexbytes = bytes.fromhex(re.sub(r"[^0-9a-fA-F]", "", raw))
+        # Split into frames on SOH (0x01) … EOT (0x04) and decode each.
+        frames, cur = [], bytearray()
+        for byte in hexbytes:
+            if byte == 0x01 and cur:
+                frames.append(bytes(cur))
+                cur = bytearray()
+            cur.append(byte)
+        if cur:
+            frames.append(bytes(cur))
+        print(f"{len(frames)} frame(s):")
+        for fr in frames:
+            parsed = protocol._parse_response(fr)
+            if parsed is None:
+                print(f"  (unparsed) {fr.hex()}")
+                continue
+            code, nibbles = parsed
+            val = protocol._nibbles_to_int(nibbles, signed=False)
+            print(f"  code {code}: {val}  (0x{val:X}, bin {val:016b})")
+        return 0
+
+    if args.scan is not None:
+        iface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface
+        try:
+            vals = protocol.scan_range(
+                args.host, args.username, args.password, args.scan[0], args.scan[1],
+                interface=iface, repeat=args.repeat,
+            )
+        except ProfiluxError as err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 1
+        print(f"scan {args.scan[0]}-{args.scan[1]} (stable, ×{args.repeat}) — non-zero values:")
+        for code, val in sorted(vals.items()):
+            if val:
+                print(f"  code {code}: {val}  (0x{val:X}, bin {val:016b})")
+        return 0
 
     if args.sweep is not None:
         iface = INTERFACE_WEBSOCKET if args.interface == "auto" else args.interface

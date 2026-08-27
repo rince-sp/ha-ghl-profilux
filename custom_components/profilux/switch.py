@@ -29,6 +29,9 @@ async def async_setup_entry(
     coordinator: ProfiluxCoordinator = hass.data[DOMAIN][entry.entry_id]
     if not entry.options.get(CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS):
         return
+    # The GHL API is read-only for outputs by design — no switching there.
+    if not coordinator.supports_socket_control:
+        return
 
     def _builder(data: dict[str, Any]):
         for socket in data.get("sockets", []):

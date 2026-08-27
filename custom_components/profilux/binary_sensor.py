@@ -42,8 +42,15 @@ async def async_setup_entry(
                 yield ("level_float", level["index"], sensor["role"]), (
                     lambda i=level["index"], r=sensor["role"]: ProfiluxLevelFloat(coordinator, i, r)
                 )
+        # Individual level sensors (GHL API mode: real per-sensor wet/dry state).
+        for lvs in data.get("level_sensors", []):
+            yield ("level_sensor", lvs["index"]), (
+                lambda i=lvs["index"]: ProfiluxLevelSensor(coordinator, i)
+            )
         if data.get("alarm") is not None:
             yield ("alarm",), (lambda: ProfiluxAlarm(coordinator))
+        if data.get("level_fault") is not None:
+            yield ("level_fault",), (lambda: ProfiluxLevelFault(coordinator))
 
     async_add_discovered(coordinator, entry, async_add_entities, _builder)
 
@@ -116,7 +123,14 @@ class ProfiluxLevelAlarm(ProfiluxEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self._level_data or {}
-        return {"fill_active": data.get("fill"), "drain_active": data.get("drain")}
+        return {
+            "fill_active": data.get("fill"),
+            "drain_active": data.get("drain"),
+            "sensors": [
+                {"role": s["role"], "sensor": s["number"], "wet": s["triggered"]}
+                for s in data.get("sensors", [])
+            ],
+        }
 
     @property
     def available(self) -> bool:
@@ -124,9 +138,15 @@ class ProfiluxLevelAlarm(ProfiluxEntity, BinarySensorEntity):
 
 
 class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
-    """One float switch assigned to a level loop (min or max), wet/dry."""
+    """One float switch assigned to a level loop (min or max).
 
-    _attr_device_class = BinarySensorDeviceClass.MOISTURE
+    A submerged (wet) float is the *good* state and a dry float is the fault,
+    so this is modelled as a PROBLEM sensor: ``on`` = dry (fault, red) and
+    ``off`` = wet (OK, green). That way the dashboard shows a dry float in red
+    and a wet float in green, matching the controller's own alarm semantics.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
     def __init__(self, coordinator: ProfiluxCoordinator, index: int, role: str) -> None:
         super().__init__(coordinator)
@@ -153,17 +173,76 @@ class ProfiluxLevelFloat(ProfiluxEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
+        # PROBLEM = dry. `triggered` is the wet state (True = wet); a dry float
+        # (triggered False) is the fault. It is None on firmware that doesn't
+        # expose per-float state over the local protocol, so the entity reads
+        # "unknown" rather than a fabricated value.
         data = self._sensor
-        return None if data is None else data.get("triggered")
+        triggered = None if data is None else data.get("triggered")
+        return None if triggered is None else (not triggered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self._sensor or {}
-        return {"sensor_number": data.get("number")}
+        triggered = data.get("triggered")
+        attrs: dict[str, Any] = {
+            "sensor_number": data.get("number"),
+            "wet": triggered,
+        }
+        if triggered is None:
+            # A dry float exists somewhere, but the controller's global flag
+            # doesn't say which one, so this individual float is unknown.
+            attrs["live_state"] = "a level float is dry (which one is not reported per-sensor)"
+        return attrs
 
     @property
     def available(self) -> bool:
         return super().available and self._sensor is not None
+
+
+class ProfiluxLevelSensor(ProfiluxEntity, BinarySensorEntity):
+    """One individual level sensor (GHL API), wet = good / dry = fault.
+
+    Modelled as a PROBLEM sensor so a dry sensor shows red and a submerged one
+    shows green/neutral, matching the controller's own semantics.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:waves"
+
+    def __init__(self, coordinator: ProfiluxCoordinator, index: int) -> None:
+        super().__init__(coordinator)
+        self._index = index
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_level_sensor_{index}"
+
+    @property
+    def _data(self) -> dict[str, Any] | None:
+        for lvs in (self.coordinator.data or {}).get("level_sensors", []):
+            if lvs["index"] == self._index:
+                return lvs
+        return None
+
+    @property
+    def name(self) -> str | None:
+        data = self._data or {}
+        return data.get("name") or f"Level sensor {self._index + 1}"
+
+    @property
+    def is_on(self) -> bool | None:
+        # PROBLEM = dry. `wet` True → submerged → OK (off).
+        data = self._data
+        if data is None or data.get("wet") is None:
+            return None
+        return not data["wet"]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self._data or {}
+        return {"wet": data.get("wet"), "raw_state": data.get("state")}
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._data is not None
 
 
 class ProfiluxAlarm(ProfiluxEntity, BinarySensorEntity):
@@ -179,3 +258,20 @@ class ProfiluxAlarm(ProfiluxEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return (self.coordinator.data or {}).get("alarm")
+
+
+class ProfiluxLevelFault(ProfiluxEntity, BinarySensorEntity):
+    """Controller-wide level-sensor fault: on (red) when any level float is dry,
+    off (green) when every level float is submerged."""
+
+    _attr_name = "Level sensor fault"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:water-alert"
+
+    def __init__(self, coordinator: ProfiluxCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_level_fault"
+
+    @property
+    def is_on(self) -> bool | None:
+        return (self.coordinator.data or {}).get("level_fault")

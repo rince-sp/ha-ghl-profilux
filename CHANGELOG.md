@@ -5,6 +5,68 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-07-31
+
+### Added
+- **GHL API interface (new, recommended).** Alongside the existing raw SWMBus
+  transports (WebSocket / HTTP), the integration can now talk the **documented
+  GHL API** — the plain-text `GET`/`SET` protocol GHL published for ProfiLux
+  firmware 7.31+. Pick it in the config flow ("Interface: GHL API"). It talks the
+  API over its **WebSocket** (`ws://<host>/ghl-api/`, up to 25 clients) — far more
+  robust for continuous polling than the single-client TCP port — handling the
+  documented quirks (skip the greeting lines, ignore the duplicate reply). It
+  must be enabled on the controller first (**System → GHL API** in GHL Control
+  Center / GHL Connect; it is off by default and after every firmware update).
+- **True per-sensor level states.** In API mode each level sensor is read
+  individually (`GET LEVELSENSOR[i] ACTSTATE`) with its own name and exposed as a
+  binary sensor — **wet = OK (green), dry = fault (red)** — instead of the
+  loop-level guess the raw registers only allow.
+- **KH Director, ION Director and flow sensors.** API mode surfaces the KH
+  Director value, up to five ION Director values (e.g. calcium, magnesium) and
+  flow sensors as additional sensors.
+- Standalone `scraper.py` gains `--api-cmd "GET SENSOR[0] ACTVALUE"` to send a
+  single GHL API line — over TCP by default, or over the WebSocket with
+  `--api-ws` (the transport the integration uses) — handy for enabling/verifying
+  the API.
+
+### Notes
+- **Socket on/off control stays SWMBus-only.** The GHL API is read-only for
+  outputs by design ("a network outage must never leave a tank unheated"), so in
+  API mode sockets are read-only status. To switch sockets, use the WebSocket /
+  HTTP interface, which keeps the on/off switch and Auto/On/Off select.
+- API mode reads no model/serial/firmware (the API exposes none), so the device
+  is identified by its host.
+
+## [1.9.0] - 2026-07-23
+
+### Fixed
+- **Level floats: wet is now the good state, dry is the fault.** The float
+  sensors are modelled as *problem* sensors — a dry float reads as a fault (red)
+  and a wet, submerged float reads as OK (green/neutral), instead of a wet float
+  showing as an alert.
+- **Level floats no longer report a fabricated wet/dry state.** The individual
+  min/max float state is not exposed by this controller firmware over the local
+  protocol — the float inputs are level-sensor inputs, a namespace separate from
+  the digital inputs, and the digital-input mask the integration read for them is
+  a constant zero (which made every float read "wet"). They now read **unknown**
+  rather than a wrong value, and carry a `live_state` attribute noting the state
+  isn't reported by the controller. The confirmed min/max **sensor number**
+  (decoded from each loop's source configuration and cross-checked against a
+  controller backup) is still surfaced as an attribute.
+
+### Changed
+- **Reworked dashboard layout.** The auto-generating strategy (and the bundled
+  example) now use a two-column layout: the **controller alarm** spans the full
+  width at the top; **sensors** sit on the left with **power & current** on the
+  right; then full-width rows for **switching channels**, **level control loops**
+  and **dosing pumps**.
+- **Socket and level cards behave like area cards.** A socket card shows its
+  name, a state-coloured icon and the current power draw on the face; tapping it
+  opens the toggle and the per-outlet power. A level-loop card shows its name and
+  a state-coloured icon; tapping it lists the sensors assigned to the loop.
+- The level **alarm** sensor now carries the loop's assigned float sensors as an
+  attribute, so the loop's more-info dialog shows them.
+
 ## [1.8.0] - 2026-07-22
 
 ### Fixed
@@ -177,6 +239,8 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.0.0
+[1.9.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.9.0
 [1.8.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.8.0
 [1.7.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.7.1
 [1.7.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.7.0
