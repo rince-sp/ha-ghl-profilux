@@ -24,6 +24,9 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.SWITCH,
     Platform.SELECT,
+    Platform.NUMBER,
+    Platform.BUTTON,
+    Platform.LIGHT,
 ]
 
 STRATEGY_URL = "/profilux_frontend/profilux-strategy.js"

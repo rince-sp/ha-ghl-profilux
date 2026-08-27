@@ -82,6 +82,17 @@ class ProfiluxDashboardStrategy {
       return switches.find((s) => socketName(s) === name) || bs;
     });
 
+    // GHL API control entities: setpoints (numbers), lighting (lights), and the
+    // aquarium actions — switches/selects/buttons that aren't tied to a socket.
+    const numbers = ids.filter((id) => id.startsWith("number."));
+    const lights = ids.filter((id) => id.startsWith("light."));
+    const buttons = ids.filter((id) => id.startsWith("button."));
+    const usedSwitches = new Set(sockets.filter((s) => s.startsWith("switch.")));
+    const actionSwitches = switches.filter((s) => !usedSwitches.has(s));
+    const actionSelects = ids.filter(
+      (id) => id.startsWith("select.") && !/_mode$/.test(id)
+    );
+
     // --- card builders --------------------------------------------------
     const heading = (h, icon) => ({ type: "heading", heading: h, icon });
 
@@ -165,6 +176,34 @@ class ProfiluxDashboardStrategy {
         column_span: 2,
         cards: [heading("Schaltkanäle", "mdi:power-socket-de"), ...sockets.map(socketCard)],
       });
+    }
+
+    // 3b. Setpoints — editable target values (GHL API control).
+    if (numbers.length) {
+      sections.push({
+        type: "grid",
+        column_span: 2,
+        cards: [
+          heading("Sollwerte", "mdi:target"),
+          ...numbers.map((id) => tile(id, 6, { icon: "mdi:target" })),
+        ],
+      });
+    }
+
+    // 3c. Lighting — master brightness, per-channel %, scene selector.
+    if (lights.length || actionSelects.length) {
+      const cards = [heading("Beleuchtung", "mdi:lightbulb-group")];
+      for (const id of lights) cards.push(tile(id, 6, { icon: "mdi:brightness-6" }));
+      for (const id of actionSelects) cards.push(tile(id, 6, { icon: "mdi:palette" }));
+      sections.push({ type: "grid", column_span: 2, cards });
+    }
+
+    // 3d. Actions — feed pause / water change / maintenance, and one-shot buttons.
+    if (actionSwitches.length || buttons.length) {
+      const cards = [heading("Aktionen", "mdi:gesture-tap-button")];
+      for (const id of actionSwitches) cards.push(tile(id, 6));
+      for (const id of buttons) cards.push(tile(id, 6));
+      sections.push({ type: "grid", column_span: 2, cards });
     }
 
     // 4. Level control loops — one card per loop, coloured by its alarm state

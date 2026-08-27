@@ -10,7 +10,17 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_INTERFACE, CONF_PORT, DEFAULT_API_PORT, DOMAIN, SCAN_INTERVAL
+from homeassistant.exceptions import HomeAssistantError
+
+from .const import (
+    CONF_API_CONTROL,
+    CONF_INTERFACE,
+    CONF_PORT,
+    DEFAULT_API_CONTROL,
+    DEFAULT_API_PORT,
+    DOMAIN,
+    SCAN_INTERVAL,
+)
 from .protocol import (
     INTERFACE_API,
     INTERFACE_HTTP,
@@ -18,11 +28,16 @@ from .protocol import (
     SOCKET_FUNCTION_ALWAYS_ON,
     Controller,
     ProfiluxError,
+    api_set,
     fetch_all,
     make_transport,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Re-read all GHL API names every N polls (names change rarely; this cuts most
+# of the per-poll traffic while still catching renames within a few minutes).
+NAME_REFRESH_EVERY = 20
 
 
 class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -41,16 +56,29 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._password = entry.data.get(CONF_PASSWORD, "")
         self._interface = entry.data.get(CONF_INTERFACE, INTERFACE_HTTP)
         self._port = entry.data.get(CONF_PORT, DEFAULT_API_PORT)
+        self._api_control = entry.options.get(CONF_API_CONTROL, DEFAULT_API_CONTROL)
         # Remembered "automatic" Function per socket, so control can be handed
         # back to the controller after a manual on/off override.
         self._auto_functions: dict[int, int] = {}
+        # GHL API name cache: names rarely change, so read them fully only every
+        # NAME_REFRESH_EVERY polls (and for any newly-appeared resource); values
+        # are always read, so new hardware still shows up on the next poll.
+        self._name_cache: dict[str, str | None] = {}
+        self._poll = 0
 
     @property
     def supports_socket_control(self) -> bool:
         """Socket on/off is a raw-SWMBus feature; the GHL API can't switch."""
         return self._interface != INTERFACE_API
 
+    @property
+    def supports_api_control(self) -> bool:
+        """API control entities (setpoints, actions, lighting) — opt-in, API only."""
+        return self._interface == INTERFACE_API and self._api_control
+
     async def _async_update_data(self) -> dict[str, Any]:
+        refresh_names = (self._poll % NAME_REFRESH_EVERY) == 0
+        self._poll += 1
         try:
             data = await self.hass.async_add_executor_job(
                 fetch_all,
@@ -60,6 +88,9 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._interface,
                 True,
                 self._port,
+                self._api_control,
+                self._name_cache,
+                refresh_names,
             )
         except ProfiluxError as err:
             raise UpdateFailed(str(err)) from err
@@ -101,3 +132,17 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if value is None:
             return False
         return await self.async_set_socket_function(index, value)
+
+    async def async_api_command(self, command: str, refresh: bool = True) -> bool:
+        """Send one GHL API SET command (control action / setpoint), then refresh."""
+
+        def _do() -> bool:
+            return api_set(self._host, command)
+
+        try:
+            ok = await self.hass.async_add_executor_job(_do)
+        except ProfiluxError as err:
+            raise HomeAssistantError(str(err)) from err
+        if refresh:
+            await self.async_request_refresh()
+        return ok

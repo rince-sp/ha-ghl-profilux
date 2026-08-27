@@ -949,8 +949,15 @@ def fetch_all(
     interface: str = INTERFACE_HTTP,
     read_names: bool = True,
     port: int = 10002,
+    control: bool = False,
+    name_cache: dict[str, str | None] | None = None,
+    refresh_names: bool = True,
 ) -> dict[str, Any]:
     """Read device info, every populated sensor, and every socket.
+
+    ``control`` (API mode only) also reads editable setpoints, which cost an
+    extra request per source. ``name_cache``/``refresh_names`` (API mode) let the
+    caller reuse names across polls (see :class:`~.api.ApiController`).
 
     Raises :class:`ProfiluxError` on connection/auth failure.
     """
@@ -960,9 +967,21 @@ def fetch_all(
         from .api import ApiController, GhlApiWsClient
 
         with GhlApiWsClient(host) as client:
-            return ApiController(client, read_names=read_names).snapshot()
+            return ApiController(
+                client,
+                read_names=read_names,
+                name_cache=name_cache,
+                refresh_names=refresh_names,
+            ).snapshot(with_control=control)
     with make_transport(interface, host, username, password) as transport:
         return Controller(transport, read_names=read_names).snapshot()
+
+
+def api_set(host: str, command: str) -> bool:
+    """Send a GHL API ``SET`` command (control actions/setpoints). API mode only."""
+    from .api import api_command
+
+    return api_command(host, command)
 
 
 def test_connection(

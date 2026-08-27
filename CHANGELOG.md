@@ -5,6 +5,29 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-08-27
+
+### Added
+- **GHL API control (opt-in).** A new *Configure* option, **Enable GHL API
+  control**, exposes entities that write to the controller over the API. It needs
+  the API set to **full access**. Off by default. It adds:
+  - **Setpoints** — editable target values (`number`) for temperature, pH, the KH
+    Director and ION Director values (`SET … DESVALUE`).
+  - **Aquarium actions** — **Feed pause**, **Water change** and **Maintenance** as
+    switches (`SPECIALFUNCTION`), plus **KH/ION measurement** and a 5-minute
+    **Thunderstorm** as buttons.
+  - **Lighting** — the illumination **master brightness** as a dimmable `light`,
+    per-channel brightness as `%` sensors, and an eight-slot **Light scene**
+    selector. (Also works for Mitras luminaires that expose illumination.)
+- The auto-generating dashboard gains **Sollwerte** (setpoints), **Beleuchtung**
+  (lighting) and **Aktionen** (actions) sections.
+
+### Changed
+- **Smarter API polling.** Names (`DESCRIPTION`) are cached and only re-read every
+  ~20 polls (and immediately for any newly-appeared resource) instead of every
+  poll — roughly halving API traffic. Live values are still read every poll, so
+  new hardware and changing readings appear right away.
+
 ## [2.0.0] - 2026-07-31
 
 ### Added
@@ -239,6 +262,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.0
 [2.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.0.0
 [1.9.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.9.0
 [1.8.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.8.0

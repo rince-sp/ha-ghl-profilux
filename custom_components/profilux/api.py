@@ -42,6 +42,20 @@ API_MAX_DOSERS = 32
 API_MAX_LEVELSENSORS = 16
 API_MAX_IONVALUES = 5
 API_MAX_FLOWSENSORS = 4
+API_MAX_ILLUMINATION = 32
+API_MAX_LIGHTSCENES = 8
+
+# Sensible min/max/step for an editable setpoint, keyed by the sensor's unit.
+# Generous ranges; the controller clamps to its own valid band anyway.
+_SETPOINT_RANGES: dict[str | None, tuple[float, float, float]] = {
+    "°C": (10.0, 40.0, 0.1),
+    "pH": (5.0, 9.0, 0.01),
+    "°dH": (4.0, 20.0, 0.1),
+    "mS/cm": (30.0, 60.0, 0.1),
+    "µS/cm": (0.0, 2000.0, 1.0),
+    "mg/L": (0.0, 20.0, 0.1),
+    None: (0.0, 1000.0, 1.0),
+}
 
 NACK_NO_ACCESS = -105        # API off, or read-only and a SET was sent
 NACK_NO_INDEX = -101         # this device doesn't have that index / hardware
@@ -111,6 +125,13 @@ class _ApiClientBase:
             return float(value.strip().strip('"'))
         except ValueError:
             return None
+
+    def set(self, command: str) -> bool:
+        """Send a SET command; return True on ``ACK`` (raw yields a value — even
+        empty — only for ACK). Raises the "API disabled / read-only" error on
+        ``NACK (-105)`` so callers can surface it."""
+        value, _ = self.raw(command)
+        return value is not None
 
 
 class GhlApiClient(_ApiClientBase):
@@ -224,17 +245,37 @@ class GhlApiWsClient(_ApiClientBase):
 
 
 class ApiController:
-    """Builds the standard snapshot dict from the GHL API."""
+    """Builds the standard snapshot dict from the GHL API.
 
-    def __init__(self, client: GhlApiClient, read_names: bool = True) -> None:
+    Names (``DESCRIPTION``) rarely change but are one read per entity per poll —
+    the biggest slice of poll traffic. A caller can pass a ``name_cache`` dict
+    (kept across polls) and ``refresh_names=False`` to reuse cached names; it
+    still reads the name of any *newly appeared* resource, and a periodic
+    ``refresh_names=True`` poll re-reads them all. Live values are always read,
+    so new hardware and changed readings appear every poll.
+    """
+
+    def __init__(
+        self,
+        client: GhlApiClient,
+        read_names: bool = True,
+        name_cache: dict[str, str | None] | None = None,
+        refresh_names: bool = True,
+    ) -> None:
         self._c = client
         self._read_names = read_names
+        self._name_cache = name_cache if name_cache is not None else {}
+        self._refresh_names = refresh_names
 
     # -- helpers ----------------------------------------------------------
     def _name(self, resource: str) -> str | None:
         if not self._read_names:
             return None
-        return self._c.text(f"GET {resource} DESCRIPTION") or None
+        if not self._refresh_names and resource in self._name_cache:
+            return self._name_cache[resource]
+        name = self._c.text(f"GET {resource} DESCRIPTION") or None
+        self._name_cache[resource] = name
+        return name
 
     # -- device -----------------------------------------------------------
     def device_info(self) -> dict[str, Any]:
@@ -290,7 +331,30 @@ class ApiController:
                     "device_class": None,
                 }
             )
+        # Illumination channels — the brightness each is running at right now (%).
+        # Read-only (live control is the master brightness / a light entity).
+        for i in range(API_MAX_ILLUMINATION):
+            v = self._c.number(f"GET ILLUMINATION[{i}] ACTBRIGHTNESS")
+            if v is None:
+                continue
+            name = self._name(f"ILLUMINATION[{i}]")
+            out.append(
+                {
+                    "index": f"light{i}",
+                    "type_id": None,
+                    "label": name or f"Light {i + 1}",
+                    "name": name or f"Light {i + 1}",
+                    "value": round(v),
+                    "decimals": 0,
+                    "unit": "%",
+                    "device_class": None,
+                }
+            )
         return out
+
+    def master_brightness(self) -> float | None:
+        """The illumination master brightness (%) — scales all channels."""
+        return self._c.number("GET ILLUMINATION MASTERBRIGHTNESS")
 
     # -- sockets (read-only: the API cannot switch outputs) ---------------
     def sockets(self) -> list[dict[str, Any]]:
@@ -359,7 +423,42 @@ class ApiController:
             )
         return out
 
-    def snapshot(self) -> dict[str, Any]:
+    # -- setpoints (editable target values) -------------------------------
+    def setpoints(self, sensors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Read the target value (``DESVALUE``) for each regulated source, so it
+        can be surfaced as an editable number. Only sources that actually carry a
+        setpoint answer; the rest are skipped."""
+        out: list[dict[str, Any]] = []
+        for s in sensors:
+            idx = s["index"]
+            if isinstance(idx, int):
+                resource = f"SENSOR[{idx}]"
+            elif idx == "kh":
+                resource = "KHDIRECTOR"
+            elif isinstance(idx, str) and idx.startswith("ion"):
+                resource = f"IONDIRECTOR[{idx[3:]}]"
+            else:
+                continue  # flow sensors have no setpoint
+            value = self._c.number(f"GET {resource} DESVALUE")
+            if value is None:
+                continue
+            lo, hi, step = _SETPOINT_RANGES.get(s.get("unit"), (0.0, 1000.0, 0.1))
+            out.append(
+                {
+                    "key": str(idx),
+                    "resource": resource,
+                    "name": s.get("name") or s.get("label"),
+                    "value": round(value, s.get("decimals", 1)),
+                    "unit": s.get("unit"),
+                    "device_class": s.get("device_class"),
+                    "min": lo,
+                    "max": hi,
+                    "step": step,
+                }
+            )
+        return out
+
+    def snapshot(self, with_control: bool = False) -> dict[str, Any]:
         sensors = self.sensors()
         sockets = self.sockets()
         levels = self.level_sensors()
@@ -375,6 +474,9 @@ class ApiController:
             "level_sensors": levels,
             "level_fault": level_fault,
             "dosing_pumps": self.dosing_pumps(),
+            # Setpoints are an extra read per source, so only when control is on.
+            "setpoints": self.setpoints(sensors) if with_control else [],
+            "master_brightness": self.master_brightness(),
         }
 
 
@@ -391,6 +493,12 @@ def _extra_sensor(
         "unit": unit,
         "device_class": None,
     }
+
+
+def api_command(host: str, command: str) -> bool:
+    """Send one GHL API ``SET`` command over the WebSocket; return True on ACK."""
+    with GhlApiWsClient(host) as client:
+        return client.set(command)
 
 
 def api_test_connection(host: str) -> None:

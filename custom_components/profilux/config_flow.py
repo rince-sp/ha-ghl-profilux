@@ -10,8 +10,10 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 
 from .const import (
+    CONF_API_CONTROL,
     CONF_CONTROL_SOCKETS,
     CONF_INTERFACE,
+    DEFAULT_API_CONTROL,
     DEFAULT_CONTROL_SOCKETS,
     DOMAIN,
 )
@@ -68,7 +70,12 @@ class ProfiluxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ProfiluxOptionsFlow(config_entries.OptionsFlow):
-    """Options: opt in to socket control (writes to the controller)."""
+    """Options: opt in to control that writes to the controller.
+
+    * ``control_sockets`` — socket on/off (SWMBus interfaces).
+    * ``api_control`` — GHL API control (setpoints, feed pause, water change,
+      maintenance, lighting); needs the API set to full access.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -76,12 +83,19 @@ class ProfiluxOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options.get(
-            CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS
-        )
+        options = self.config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
-                {vol.Required(CONF_CONTROL_SOCKETS, default=current): bool}
+                {
+                    vol.Required(
+                        CONF_CONTROL_SOCKETS,
+                        default=options.get(CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS),
+                    ): bool,
+                    vol.Required(
+                        CONF_API_CONTROL,
+                        default=options.get(CONF_API_CONTROL, DEFAULT_API_CONTROL),
+                    ): bool,
+                }
             ),
         )
