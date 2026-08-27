@@ -21,6 +21,13 @@ DEFAULT_API_PORT = 10002
 CONF_CONTROL_SOCKETS = "control_sockets"
 DEFAULT_CONTROL_SOCKETS = False
 
+# Opt-in GHL API control. Off by default: enabling it exposes entities that
+# *write* to the controller over the GHL API — editable setpoints, feed pause /
+# water change / maintenance, light scenes, brightness and measurement triggers.
+# Requires the API to be set to "full access" on the controller (not read only).
+CONF_API_CONTROL = "api_control"
+DEFAULT_API_CONTROL = False
+
 # The powerbar reports current (A); power (W) is estimated as current × mains
 # voltage. EU default; adjust if your mains differs.
 MAINS_VOLTAGE = 230
