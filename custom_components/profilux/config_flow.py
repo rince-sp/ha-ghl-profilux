@@ -12,8 +12,6 @@ from homeassistant.core import callback
 from .const import (
     CONF_CONTROL_SOCKETS,
     CONF_INTERFACE,
-    CONF_PORT,
-    DEFAULT_API_PORT,
     DEFAULT_CONTROL_SOCKETS,
     DOMAIN,
 )
@@ -25,7 +23,6 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Optional(CONF_USERNAME, default="admin"): str,
         vol.Optional(CONF_PASSWORD, default=""): str,
         vol.Required(CONF_INTERFACE, default=INTERFACE_HTTP): vol.In(INTERFACES),
-        vol.Optional(CONF_PORT, default=DEFAULT_API_PORT): int,
     }
 )
 
@@ -55,7 +52,6 @@ class ProfiluxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input.get(CONF_USERNAME, ""),
                     user_input.get(CONF_PASSWORD, ""),
                     user_input[CONF_INTERFACE],
-                    user_input.get(CONF_PORT, DEFAULT_API_PORT),
                 )
             except ProfiluxError:
                 errors["base"] = "cannot_connect"

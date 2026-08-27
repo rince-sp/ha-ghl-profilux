@@ -3,13 +3,12 @@
     "step": {
       "user": {
         "title": "Connect to ProfiLux",
-        "description": "Choose an interface. GHL API (recommended, firmware 7.31+) — enable it first under System → GHL API in GHL Control Center / GHL Connect; richer data and per-sensor level states, but read-only (no socket switching). HTTP / WebSocket — the raw SWMBus interface, which also allows socket on/off control.",
+        "description": "Choose an interface. GHL API (recommended, firmware 7.31+) — enable it first under System → GHL API in GHL Control Center / GHL Connect; talks the API over its WebSocket, gives richer data and per-sensor level states, but is read-only (no socket switching). HTTP / WebSocket — the raw SWMBus interface, which also allows socket on/off control.",
         "data": {
           "host": "Host (IP address)",
           "username": "Username (SWMBus only)",
           "password": "Password (SWMBus only)",
-          "interface": "Interface",
-          "port": "GHL API port (default 10002)"
+          "interface": "Interface"
         }
       }
     },

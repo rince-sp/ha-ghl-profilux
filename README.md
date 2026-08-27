@@ -47,7 +47,7 @@ The integration supports three local interfaces, selectable in the config flow:
 
 | Interface | Transport | Use for |
 |-----------|-----------|---------|
-| `ghl_api` | the **documented GHL API** — plain-text `GET`/`SET` over TCP (default port 10002) | ProfiLux 4 firmware **7.31+** (recommended) |
+| `ghl_api` | the **documented GHL API** — plain-text `GET`/`SET` over its WebSocket (`ws://<host>/ghl-api/`) | ProfiLux 4 firmware **7.31+** (recommended) |
 | `websocket` | raw SWMBus frames over `ws://<host>/ws` | ProfiLux 4 (fw 7.x), ProfiLux mini |
 | `http` | `GET http://<host>/communication.php?dir=enq&code=<code>` → `command=<code>&data=<value>` | older ProfiLux 3 / 4 firmware that still serves `communication.php` |
 
@@ -62,14 +62,18 @@ level sensor's individual wet/dry state**, the **KH Director**, up to five
 - **Enable it first.** The API is **off by default** (and after every firmware
   update). Turn it on under **System → GHL API** in GHL Control Center or GHL
   Connect. **Read access is enough** for this integration.
+- **Talks over the WebSocket.** The integration uses the API's WebSocket
+  (`ws://<host>/ghl-api/`, up to 25 clients), not the single-client TCP port —
+  so it keeps working even while the GHL app is connected.
 - **Read-only for outputs by design.** The API cannot switch outlets ("a network
   outage must never leave a tank unheated"), so **socket on/off control is not
   available in API mode** — use the `websocket` / `http` interface for that.
 - No username/password (the API has none — your network is the perimeter; keep
-  the device on a trusted LAN and don't forward port 10002 through your router).
-- Verify/enable it from the LAN with the bundled scraper:
+  the device on a trusted LAN and don't forward the API through your router).
+- Verify/enable it from the LAN with the bundled scraper — over the WebSocket the
+  integration uses (`--api-ws`), or the plain TCP port for a quick manual check:
   ```bash
-  python scraper.py 192.168.1.50 --api-cmd "GET SENSOR[0] ACTVALUE"
+  python scraper.py 192.168.1.50 --api-ws --api-cmd "GET SENSOR[0] ACTVALUE"
   # -> ACK <24.412>   (NACK (-105) means the API is still switched off)
   ```
 

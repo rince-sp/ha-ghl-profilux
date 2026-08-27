@@ -11,10 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GHL API interface (new, recommended).** Alongside the existing raw SWMBus
   transports (WebSocket / HTTP), the integration can now talk the **documented
   GHL API** — the plain-text `GET`/`SET` protocol GHL published for ProfiLux
-  firmware 7.31+. Pick it in the config flow ("Interface: GHL API", default port
-  10002). It must be enabled on the controller first (**System → GHL API** in GHL
-  Control Center / GHL Connect; it is off by default and after every firmware
-  update).
+  firmware 7.31+. Pick it in the config flow ("Interface: GHL API"). It talks the
+  API over its **WebSocket** (`ws://<host>/ghl-api/`, up to 25 clients) — far more
+  robust for continuous polling than the single-client TCP port — handling the
+  documented quirks (skip the greeting lines, ignore the duplicate reply). It
+  must be enabled on the controller first (**System → GHL API** in GHL Control
+  Center / GHL Connect; it is off by default and after every firmware update).
 - **True per-sensor level states.** In API mode each level sensor is read
   individually (`GET LEVELSENSOR[i] ACTSTATE`) with its own name and exposed as a
   binary sensor — **wet = OK (green), dry = fault (red)** — instead of the
@@ -23,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Director value, up to five ION Director values (e.g. calcium, magnesium) and
   flow sensors as additional sensors.
 - Standalone `scraper.py` gains `--api-cmd "GET SENSOR[0] ACTVALUE"` to send a
-  single GHL API line (with `--api-port`), handy for enabling/verifying the API.
+  single GHL API line — over TCP by default, or over the WebSocket with
+  `--api-ws` (the transport the integration uses) — handy for enabling/verifying
+  the API.
 
 ### Notes
 - **Socket on/off control stays SWMBus-only.** The GHL API is read-only for

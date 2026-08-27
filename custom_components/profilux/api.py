@@ -58,21 +58,74 @@ API_DISABLED_MESSAGE = (
 LEVELSENSOR_ACTIVE_IS_WET = True
 
 
-class GhlApiClient:
-    """Talks the GHL API over TCP (one short connection per command)."""
+def _parse_reply(reply: str) -> tuple[str | None, int | None]:
+    """Parse one API reply line.
+
+    ``ACK <value>`` → ``(value, None)``; a bare ``ACK`` → ``("", None)``;
+    ``NACK (code)`` → ``(None, code)``. Raises on the no-access code.
+    """
+    reply = (reply or "").strip()
+    if reply.startswith("ACK"):
+        if "<" in reply and ">" in reply:
+            return reply[reply.index("<") + 1 : reply.rindex(">")], None
+        return "", None
+    if reply.startswith("NACK"):
+        code: int | None = None
+        try:
+            code = int(reply[reply.index("(") + 1 : reply.index(")")])
+        except (ValueError, IndexError):
+            code = None
+        if code == NACK_NO_ACCESS:
+            raise ProfiluxError(API_DISABLED_MESSAGE)
+        return None, code
+    return None, None
+
+
+class _ApiClientBase:
+    """Shared ``raw``/``text``/``number`` on top of a transport's ``_command``."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        pass
+
+    def _command(self, command: str) -> str:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def raw(self, command: str) -> tuple[str | None, int | None]:
+        return _parse_reply(self._command(command))
+
+    def text(self, command: str) -> str | None:
+        value, _ = self.raw(command)
+        return None if value is None else value.strip().strip('"').strip()
+
+    def number(self, command: str) -> float | None:
+        value, _ = self.raw(command)
+        if value is None:
+            return None
+        try:
+            return float(value.strip().strip('"'))
+        except ValueError:
+            return None
+
+
+class GhlApiClient(_ApiClientBase):
+    """GHL API over raw TCP — one short connection per command.
+
+    The TCP port serves only one client at a time, so this is best for one-off
+    checks; a continuous poller should prefer :class:`GhlApiWsClient`.
+    """
 
     def __init__(self, host: str, port: int = DEFAULT_API_PORT, timeout: int = 10) -> None:
         self._host = host
         self._port = port
         self._timeout = timeout
 
-    def __enter__(self) -> "GhlApiClient":
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        pass
-
-    def _exchange(self, command: str) -> str:
+    def _command(self, command: str) -> str:
         try:
             with socket.create_connection((self._host, self._port), self._timeout) as sock:
                 sock.settimeout(self._timeout)
@@ -91,37 +144,83 @@ class GhlApiClient:
             ) from err
         return buf.decode("latin-1", "ignore").strip()
 
-    def raw(self, command: str) -> tuple[str | None, int | None]:
-        """Return ``(value, None)`` for ``ACK <value>`` / ``("", None)`` for a
-        bare ``ACK``; ``(None, code)`` for ``NACK (code)``. Raises on no-access."""
-        reply = self._exchange(command)
-        if reply.startswith("ACK"):
-            if "<" in reply and ">" in reply:
-                return reply[reply.index("<") + 1 : reply.rindex(">")], None
-            return "", None
-        if reply.startswith("NACK"):
-            code: int | None = None
-            try:
-                code = int(reply[reply.index("(") + 1 : reply.index(")")])
-            except (ValueError, IndexError):
-                code = None
-            if code == NACK_NO_ACCESS:
-                raise ProfiluxError(API_DISABLED_MESSAGE)
-            return None, code
-        return None, None
 
-    def text(self, command: str) -> str | None:
-        value, _ = self.raw(command)
-        return None if value is None else value.strip().strip('"').strip()
+class GhlApiWsClient(_ApiClientBase):
+    """GHL API over its WebSocket (``ws://<host>/ghl-api/``).
 
-    def number(self, command: str) -> float | None:
-        value, _ = self.raw(command)
-        if value is None:
-            return None
+    This is the interface the integration uses: it holds one connection (the
+    device allows up to 25) and sends commands as text frames, which is far more
+    robust for continuous polling than the single-client TCP port.
+
+    Three documented quirks are handled here:
+
+    * On connect the device sends two greeting lines (``greetings client #x`` and
+      ``server->count() #y``) — skipped.
+    * Replies go to *every* connected client, and each reply currently arrives
+      **twice**. Commands are sent one at a time and the buffer is drained before
+      each send, so a stale/duplicate reply can't be mistaken for the next one.
+    * A command frame carries no trailing newline (the frame is the delimiter).
+    """
+
+    def __init__(self, host: str, timeout: int = 10, read_timeout: float = 4.0) -> None:
+        self._url = f"ws://{host}/ghl-api/"
+        self._timeout = timeout
+        self._read_timeout = read_timeout
+        self._ws: Any = None
+
+    def _connect(self) -> None:
         try:
-            return float(value.strip().strip('"'))
-        except ValueError:
-            return None
+            import websocket  # noqa: PLC0415 - optional dep, shared with the SWMBus transport
+
+            self._ws = websocket.create_connection(self._url, timeout=self._timeout)
+            self._ws.settimeout(self._read_timeout)
+        except Exception as err:  # noqa: BLE001
+            raise ProfiluxError(f"cannot connect to the GHL API at {self._url}: {err}") from err
+        # Discard the two greeting lines (and anything else buffered).
+        self._drain(0.5)
+
+    def _drain(self, timeout: float) -> None:
+        if self._ws is None:
+            return
+        self._ws.settimeout(timeout)
+        try:
+            while True:
+                try:
+                    self._ws.recv()
+                except Exception:  # noqa: BLE001 - any read stall/close ends the drain
+                    return
+        finally:
+            if self._ws is not None:
+                self._ws.settimeout(self._read_timeout)
+
+    def _command(self, command: str) -> str:
+        if self._ws is None:
+            self._connect()
+        try:
+            # Clear any leftover frame (e.g. the duplicate of the previous reply)
+            # so it can't be read as this command's answer.
+            self._drain(0.05)
+            self._ws.send(command)
+            for _ in range(12):
+                frame = self._ws.recv()
+                if isinstance(frame, bytes):
+                    frame = frame.decode("latin-1", "ignore")
+                line = frame.strip()
+                if line.startswith(("ACK", "NACK")):
+                    return line
+                # Otherwise a greeting/other client's line — keep reading.
+        except Exception as err:  # noqa: BLE001
+            self.close()
+            raise ProfiluxError(f"GHL API WebSocket error: {err}") from err
+        return ""
+
+    def close(self) -> None:
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._ws = None
 
 
 class ApiController:
@@ -294,9 +393,10 @@ def _extra_sensor(
     }
 
 
-def api_test_connection(host: str, port: int = DEFAULT_API_PORT) -> None:
-    """Reachability/enabled check for the config flow: one GET must answer."""
-    with GhlApiClient(host, port) as client:
+def api_test_connection(host: str) -> None:
+    """Reachability/enabled check for the config flow, over the WebSocket the
+    integration uses: one GET must answer."""
+    with GhlApiWsClient(host) as client:
         # SENSOR[0] ACTVALUE is the doc's canonical probe. raw() raises the
         # helpful "API disabled" message on NACK (-105); a plain missing index
         # (-101) still proves the API is reachable and enabled.

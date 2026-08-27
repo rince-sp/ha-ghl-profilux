@@ -119,7 +119,48 @@ def main() -> int:
     parser.add_argument(
         "--api-port", type=int, default=10002, help="TCP port for the GHL API (default 10002)"
     )
+    parser.add_argument(
+        "--api-ws",
+        action="store_true",
+        help="Send --api-cmd over the GHL API WebSocket (ws://host/ghl-api/) instead of TCP — "
+        "this is the transport the integration uses (needs websocket-client)",
+    )
     args = parser.parse_args()
+
+    if args.api_cmd is not None and args.api_ws:
+        # Talk the GHL API over its WebSocket: skip the two greeting lines, send
+        # the command as a text frame (no newline), read the reply, ignore the
+        # duplicate. This mirrors the integration's transport exactly.
+        try:
+            import websocket
+        except ImportError:
+            print("ERROR: --api-ws needs websocket-client (pip install websocket-client)", file=sys.stderr)
+            return 1
+        url = f"ws://{args.host}/ghl-api/"
+        try:
+            ws = websocket.create_connection(url, timeout=10)
+            ws.settimeout(1.0)
+            for _ in range(10):  # drain greetings
+                try:
+                    ws.recv()
+                except Exception:
+                    break
+            ws.settimeout(5.0)
+            ws.send(args.api_cmd)
+            reply = ""
+            for _ in range(12):
+                frame = ws.recv()
+                if isinstance(frame, bytes):
+                    frame = frame.decode("latin-1", "ignore")
+                if frame.strip().startswith(("ACK", "NACK")):
+                    reply = frame.strip()
+                    break
+            ws.close()
+        except Exception as err:  # noqa: BLE001
+            print(f"ERROR: GHL API WebSocket {url}: {err}", file=sys.stderr)
+            return 1
+        print(reply or "(no ACK/NACK reply)")
+        return 0
 
     if args.api_cmd is not None:
         import socket as _socket

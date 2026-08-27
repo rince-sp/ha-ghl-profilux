@@ -955,9 +955,11 @@ def fetch_all(
     Raises :class:`ProfiluxError` on connection/auth failure.
     """
     if interface == INTERFACE_API:
-        from .api import ApiController, GhlApiClient
+        # The integration talks the GHL API over its WebSocket (up to 25 clients),
+        # which is far more robust for polling than the single-client TCP port.
+        from .api import ApiController, GhlApiWsClient
 
-        with GhlApiClient(host, port) as client:
+        with GhlApiWsClient(host) as client:
             return ApiController(client, read_names=read_names).snapshot()
     with make_transport(interface, host, username, password) as transport:
         return Controller(transport, read_names=read_names).snapshot()
@@ -974,7 +976,7 @@ def test_connection(
     if interface == INTERFACE_API:
         from .api import api_test_connection
 
-        api_test_connection(host, port)
+        api_test_connection(host)
         return
     with make_transport(interface, host, username, password) as transport:
         if Controller(transport)._get_int(CODE_GET_SENSOR_COUNT, signed=False) is None:
