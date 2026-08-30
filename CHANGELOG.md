@@ -5,6 +5,16 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.4] - 2026-08-30
+
+### Changed
+- **Brand logos trimmed of transparent margin.** `logo.png` and `logo@2x.png`
+  are cropped to their content (804→792 px and 1608→1582 px wide), matching the
+  Home Assistant brands "trimmed edges" guideline. The icons were already
+  edge-to-edge. These images ship inline in `custom_components/profilux/brand/`
+  and are served by Home Assistant's brands proxy (`/api/brands/integration/
+  profilux/…`) since HA 2026.3 — no `home-assistant/brands` PR is needed.
+
 ## [2.2.3] - 2026-08-30
 
 ### Fixed
@@ -350,6 +360,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.2.4]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.4
 [2.2.3]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.3
 [2.2.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.2
 [2.2.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.1
