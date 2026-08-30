@@ -5,6 +5,19 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.7] - 2026-08-30
+
+### Fixed
+- **Sockets no longer hijacked by orphaned switches after switching interface.**
+  The strategy prefers a controllable `switch` over the read-only status
+  `binary_sensor` for a socket — but switching interface (SWMBus ⇄ GHL API)
+  leaves the other mode's socket switches behind as **unavailable orphans**, and
+  the strategy was picking those, so every socket showed "unavailable" (and,
+  having no live `channel`, fell back to alphabetical order). The switch is now
+  preferred only when it is **available**; an orphaned one is ignored and the
+  live status sensor is used. A genuinely live switch (socket-control mode) is
+  still preferred, so nothing changes there.
+
 ## [2.2.6] - 2026-08-30
 
 ### Fixed
@@ -381,6 +394,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.2.7]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.7
 [2.2.6]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.6
 [2.2.5]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.5
 [2.2.4]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.4
