@@ -179,6 +179,27 @@ def classify_sensor(type_id: int | None, name: str | None) -> tuple[str, str | N
     return (name or "Sensor", None, None, DEFAULT_DECIMALS)
 
 
+# Explicit sensor-type overrides → (label, unit, device_class, decimals). Used
+# when the user pins a sensor's type (some firmwares report an unreliable type
+# register, and probes named by location don't match a keyword). Keys match
+# const.SENSOR_TYPE_CHOICES (minus "auto").
+SENSOR_TYPE_MAP: dict[str, tuple[str, str | None, str | None, int]] = {
+    "ph": ("pH", "pH", None, 2),
+    "temperature": ("Temperature", "°C", "temperature", 1),
+    "redox": ("Redox", "mV", None, 0),
+    "conductivity": ("Conductivity", "mS/cm", None, 1),
+    "oxygen": ("Oxygen", "mg/L", None, 1),
+    "humidity": ("Humidity", "%", "humidity", 0),
+}
+
+
+def _looks_like_scaled_ph(value: float | None) -> bool:
+    """True if an unidentified sensor value looks like a pH shifted a decimal
+    place too high (≈ pH 5.0–10.0 before the /10) — realistic aquarium and
+    calcium-reactor pH, excluding ION values, conductivity, etc."""
+    return value is not None and 50 <= value <= 100
+
+
 # ProfiLux product ids -> model name (unknown ids fall back to "ProfiLux (id N)").
 PRODUCT_IDS: dict[int, str] = {
     2: "ProfiLux II",
@@ -629,10 +650,17 @@ class Controller:
     stays silent.
     """
 
-    def __init__(self, transport: Transport, retries: int = 3, read_names: bool = True) -> None:
+    def __init__(
+        self,
+        transport: Transport,
+        retries: int = 3,
+        read_names: bool = True,
+        sensor_overrides: dict[str, str] | None = None,
+    ) -> None:
         self._t = transport
         self._retries = max(1, retries)
         self._read_names = read_names
+        self._overrides = sensor_overrides or {}
 
     def _get_int(self, code: int, signed: bool = True) -> int | None:
         for _ in range(self._retries):
@@ -684,8 +712,22 @@ class Controller:
         for i in present:
             name = names.get(name_code[i])
             type_id = types.get(type_code[i])
-            label, unit, device_class, decimals = classify_sensor(type_id, name)
-            value = round(values[value_code[i]] / (10 ** decimals), decimals)
+            override = self._overrides.get(name or "")
+            if override in SENSOR_TYPE_MAP:
+                # User pinned the type explicitly.
+                label, unit, device_class, decimals = SENSOR_TYPE_MAP[override]
+                value = round(values[value_code[i]] / (10 ** decimals), decimals)
+            else:
+                label, unit, device_class, decimals = classify_sensor(type_id, name)
+                value = round(values[value_code[i]] / (10 ** decimals), decimals)
+                # A pH probe named by location (e.g. "Kalkreaktor") has an
+                # unreliable type register and no pH keyword, so it falls back to
+                # 1 decimal and reads a power of ten too high. pH is 0..14, so
+                # relabel and rescale an otherwise-unidentified sensor in the
+                # pH×10 band.
+                if unit is None and _looks_like_scaled_ph(value):
+                    label, unit, device_class, decimals = SENSOR_TYPE_MAP["ph"]
+                    value = round(value / 10, decimals)
             result.append(
                 {
                     "index": i,
@@ -977,7 +1019,9 @@ def fetch_all(
                 sensor_overrides=sensor_overrides,
             ).snapshot(with_control=control)
     with make_transport(interface, host, username, password) as transport:
-        return Controller(transport, read_names=read_names).snapshot()
+        return Controller(
+            transport, read_names=read_names, sensor_overrides=sensor_overrides
+        ).snapshot()
 
 
 def api_set(host: str, command: str) -> bool:

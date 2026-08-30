@@ -5,6 +5,29 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-08-30
+
+### Fixed
+- **pH still read a decimal place too high on some controllers** (e.g. 84.1
+  instead of 8.41), even in GHL API mode. The pH×10 detection ran *after* the
+  unit-count probe, so a pH sensor whose firmware answered `ACTVALUE[1]`/`[2]`
+  was mis-detected as temperature/conductivity and never rescaled. The pH value
+  check now runs **first** — a raw reading of ≈50–100 can't be an aquarium
+  temperature or seawater conductivity, so it is unambiguously a scaled pH — and
+  no longer depends on the unit probe.
+- **The per-sensor type dropdowns did not appear under *Configure*.** They were
+  gated to GHL API mode and also blocked by a stale translation file. The
+  dropdowns now show on **every** interface (a manual type override also helps on
+  SWMBus, where some firmwares report an unreliable type register), and the
+  options texts — including the new *GHL API control* toggle — render correctly
+  again (the shipped `translations/en.json` had fallen behind `strings.json`,
+  which is the file Home Assistant actually displays).
+
+### Changed
+- The pH×10 correction and the per-sensor type override now apply on the
+  **SWMBus** (HTTP / WebSocket) interfaces too, not only the GHL API — a pH probe
+  named by location is corrected and can be pinned there as well.
+
 ## [2.2.0] - 2026-08-30
 
 ### Added
