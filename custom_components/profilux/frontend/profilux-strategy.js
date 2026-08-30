@@ -38,10 +38,21 @@ class ProfiluxDashboardStrategy {
     );
     const ids = entities.map((e) => e.entity_id).sort((a, b) => a.localeCompare(b));
     const stateOf = (id) => hass.states[id];
+    // An entity is worth showing only if it currently has a real state — this
+    // keeps orphaned/unavailable entities (e.g. left over from switching
+    // interface) from rendering as broken "unavailable" tiles.
+    const isLive = (id) => {
+      const s = stateOf(id);
+      return s && s.state !== "unavailable" && s.state !== "unknown";
+    };
 
     const isSensor = (id) => id.startsWith("sensor.");
     const gauges = ids.filter(
-      (id) => isSensor(id) && !/_(current|power|status)$/.test(id) && !/_fill_level$/.test(id)
+      (id) =>
+        isSensor(id) &&
+        !/_(current|power|status)$/.test(id) &&
+        !/_fill_level$/.test(id) &&
+        isLive(id)
     );
     const dosing = ids.filter((id) => isSensor(id) && /_fill_level$/.test(id));
     const totalPower = ids.find((id) => id.endsWith("_total_power"));

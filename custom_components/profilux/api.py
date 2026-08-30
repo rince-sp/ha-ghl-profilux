@@ -292,6 +292,13 @@ class ApiController:
                 continue
             name = self._name(f"SENSOR[{i}]")
             label, unit, device_class, decimals = classify_sensor(None, name)
+            # The GHL API doesn't expose the sensor *type*, so a pH probe named by
+            # location (e.g. "Kalkreaktor", "Technikbecken") isn't recognised by
+            # name — and the API returns pH a decimal place too high. An
+            # otherwise-unidentified sensor whose value sits in the pH×10 band is
+            # almost certainly such a pH probe, so treat it as pH.
+            if unit is None and _looks_like_scaled_ph(value):
+                label, unit, device_class, decimals = "pH", "pH", None, 2
             value = _fix_ph_scale(label, value)
             out.append(
                 {
@@ -480,6 +487,13 @@ class ApiController:
             "setpoints": self.setpoints(sensors) if with_control else [],
             "master_brightness": self.master_brightness(),
         }
+
+
+def _looks_like_scaled_ph(value: float | None) -> bool:
+    """True if an unidentified sensor value looks like a pH returned ×10 by the
+    GHL API. The band (≈ pH 5.0–10.0 before the /10) covers realistic aquarium
+    and calcium-reactor pH while excluding ION values, conductivity, etc."""
+    return value is not None and 50 <= value <= 100
 
 
 def _fix_ph_scale(label: str | None, value: float | None) -> float | None:

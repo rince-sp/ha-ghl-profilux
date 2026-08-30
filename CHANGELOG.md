@@ -5,6 +5,18 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-08-30
+
+### Fixed
+- **GHL API: pH probes named by location** (e.g. "Kalkreaktor", "Technikbecken")
+  were not recognised as pH — the API doesn't expose the sensor type — so they
+  showed a decimal place too high (66.3, 84.1 instead of 6.63, 8.41). An
+  otherwise-unidentified sensor whose value sits in the pH×10 band is now treated
+  as pH and corrected. (v2.1.1 only caught sensors literally named "pH".)
+- **Dashboard: unavailable/unknown sensors no longer render as broken gauges.**
+  The auto-generating strategy skips sensor entities without a live state (e.g.
+  orphans left over from switching interface), so they don't clutter the layout.
+
 ## [2.1.1] - 2026-08-28
 
 ### Fixed
@@ -271,6 +283,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.1.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.2
 [2.1.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.1
 [2.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.0
 [2.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.0.0
