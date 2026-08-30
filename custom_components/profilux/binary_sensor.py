@@ -85,7 +85,9 @@ class ProfiluxSocket(ProfiluxEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self._socket_data or {}
-        return {"current_a": data.get("current")}
+        # "channel" is the 1-based controller channel number, so the dashboard
+        # can order the sockets by hardware channel rather than by name.
+        return {"channel": self._index + 1, "current_a": data.get("current")}
 
     @property
     def available(self) -> bool:

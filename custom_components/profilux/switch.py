@@ -134,6 +134,9 @@ class ProfiluxSocketSwitch(ProfiluxEntity, SwitchEntity):
         data = self._socket_data or {}
         current = data.get("current")
         return {
+            # 1-based controller channel number, so the dashboard can order the
+            # sockets by hardware channel rather than by name.
+            "channel": self._index + 1,
             # "auto" = following the controller's automation; "on"/"off" = forced.
             "mode": data.get("mode"),
             "can_restore_auto": self.coordinator.auto_function(self._index) is not None,

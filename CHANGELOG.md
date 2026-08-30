@@ -5,6 +5,24 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-08-30
+
+### Fixed
+- **Dashboard: the "Level sensor fault" sensor no longer appears among the
+  switching channels.** The strategy classified sockets by matching text in the
+  entity id, but entity ids are derived from the (localised, user-editable)
+  friendly name — so the controller-wide level-fault sensor slipped past the
+  socket filter and rendered as the first Schaltkanäle tile, while going missing
+  from the level section. Sockets are now identified by `device_class: power`
+  and the level entities by `device_class: problem`, which is name-independent.
+  As a side effect, a location-named level sensor (e.g. "Technikbecken") is now
+  grouped with the level section instead of leaking into the sockets.
+
+### Added
+- **Switching channels are ordered by hardware channel number** (1, 2, 3 …)
+  instead of alphabetically by name. Each socket now exposes a `channel`
+  attribute (its 1-based controller channel) that the dashboard sorts on.
+
 ## [2.2.1] - 2026-08-30
 
 ### Fixed
