@@ -22,11 +22,11 @@
 
 // Gauge ranges keyed by unit of measurement.
 const RANGES = {
-  "°C": { min: 18, max: 32, severity: { green: 24, yellow: 27, red: 29 } },
+  "\u00b0C": { min: 18, max: 32, severity: { green: 24, yellow: 27, red: 29 } },
   pH: { min: 6, max: 9 },
   mV: { min: 0, max: 500 },
   "mS/cm": { min: 0, max: 60, severity: { green: 45, yellow: 56, red: 58 } },
-  "µS/cm": { min: 0, max: 2000 },
+  "\u00b5S/cm": { min: 0, max: 2000 },
   "%": { min: 0, max: 100 },
   "mg/L": { min: 0, max: 20 },
 };
@@ -216,7 +216,7 @@ class ProfiluxDashboardStrategy {
       sections.push({
         type: "grid",
         column_span: 2,
-        cards: [heading("Schaltkanäle", "mdi:power-socket-de"), ...sockets.map(socketCard)],
+        cards: [heading("Schaltkan\u00e4le", "mdi:power-socket-de"), ...sockets.map(socketCard)],
       });
     }
 

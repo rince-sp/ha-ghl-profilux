@@ -5,6 +5,16 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.6] - 2026-08-30
+
+### Fixed
+- **Garbled section heading ("SchaltkanÃ¤le") in some apps.** Home Assistant
+  serves the strategy JS without a charset, so a freshly-loaded copy could be
+  decoded as Latin-1 by the mobile app's web view, mangling accented characters.
+  The three rendered strings that contained non-ASCII (`Schaltkanäle`, and the
+  `°C` / `µS/cm` gauge-range keys) are now written as `\u` escapes, so the
+  script is pure ASCII and decodes identically no matter how it's served.
+
 ## [2.2.5] - 2026-08-30
 
 ### Fixed
@@ -371,6 +381,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.2.6]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.6
 [2.2.5]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.5
 [2.2.4]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.4
 [2.2.3]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.3
