@@ -28,6 +28,21 @@ DEFAULT_CONTROL_SOCKETS = False
 CONF_API_CONTROL = "api_control"
 DEFAULT_API_CONTROL = False
 
+# Per-sensor type override (GHL API mode). The API doesn't expose a sensor's
+# type, so classification falls back to the name and a unit-count probe; this
+# lets the user pin a sensor's type explicitly. Stored as {sensor name: type}.
+CONF_SENSOR_TYPES = "sensor_types"
+SENSOR_TYPE_AUTO = "auto"
+SENSOR_TYPE_CHOICES = [
+    SENSOR_TYPE_AUTO,
+    "ph",
+    "temperature",
+    "redox",
+    "conductivity",
+    "oxygen",
+    "humidity",
+]
+
 # The powerbar reports current (A); power (W) is estimated as current × mains
 # voltage. EU default; adjust if your mains differs.
 MAINS_VOLTAGE = 230

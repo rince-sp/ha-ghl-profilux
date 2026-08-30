@@ -13,11 +13,20 @@ from .const import (
     CONF_API_CONTROL,
     CONF_CONTROL_SOCKETS,
     CONF_INTERFACE,
+    CONF_SENSOR_TYPES,
     DEFAULT_API_CONTROL,
     DEFAULT_CONTROL_SOCKETS,
     DOMAIN,
+    SENSOR_TYPE_AUTO,
+    SENSOR_TYPE_CHOICES,
 )
-from .protocol import INTERFACE_HTTP, INTERFACES, ProfiluxError, test_connection
+from .protocol import (
+    INTERFACE_API,
+    INTERFACE_HTTP,
+    INTERFACES,
+    ProfiluxError,
+    test_connection,
+)
 
 STEP_USER_SCHEMA = vol.Schema(
     {
@@ -70,32 +79,61 @@ class ProfiluxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ProfiluxOptionsFlow(config_entries.OptionsFlow):
-    """Options: opt in to control that writes to the controller.
+    """Options: control opt-ins, plus per-sensor type overrides (GHL API mode).
 
     * ``control_sockets`` — socket on/off (SWMBus interfaces).
     * ``api_control`` — GHL API control (setpoints, feed pause, water change,
       maintenance, lighting); needs the API set to full access.
+    * one select per discovered sensor (API mode) — pin its type, since the API
+      doesn't report the type. "auto" leaves it to name + unit-probe + heuristic.
     """
+
+    def _sensor_names(self) -> list[str]:
+        """Named sensors from the last poll (only meaningful in GHL API mode)."""
+        if self.config_entry.data.get(CONF_INTERFACE) != INTERFACE_API:
+            return []
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        data = getattr(coordinator, "data", None) or {}
+        return [s["name"] for s in data.get("sensors", []) if s.get("name")]
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        names = self._sensor_names()
+
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            data: dict[str, Any] = {
+                CONF_CONTROL_SOCKETS: user_input.get(
+                    CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS
+                ),
+                CONF_API_CONTROL: user_input.get(CONF_API_CONTROL, DEFAULT_API_CONTROL),
+            }
+            overrides = {
+                name: user_input[name]
+                for name in names
+                if user_input.get(name, SENSOR_TYPE_AUTO) != SENSOR_TYPE_AUTO
+            }
+            if overrides:
+                data[CONF_SENSOR_TYPES] = overrides
+            return self.async_create_entry(title="", data=data)
 
         options = self.config_entry.options
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_CONTROL_SOCKETS,
-                        default=options.get(CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS),
-                    ): bool,
-                    vol.Required(
-                        CONF_API_CONTROL,
-                        default=options.get(CONF_API_CONTROL, DEFAULT_API_CONTROL),
-                    ): bool,
-                }
-            ),
-        )
+        current_types = options.get(CONF_SENSOR_TYPES, {})
+        schema: dict[Any, Any] = {
+            vol.Required(
+                CONF_CONTROL_SOCKETS,
+                default=options.get(CONF_CONTROL_SOCKETS, DEFAULT_CONTROL_SOCKETS),
+            ): bool,
+            vol.Required(
+                CONF_API_CONTROL,
+                default=options.get(CONF_API_CONTROL, DEFAULT_API_CONTROL),
+            ): bool,
+        }
+        # One type-override dropdown per named sensor (the key is the sensor name,
+        # so it shows as the field label).
+        for name in names:
+            schema[
+                vol.Optional(name, default=current_types.get(name, SENSOR_TYPE_AUTO))
+            ] = vol.In(SENSOR_TYPE_CHOICES)
+
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

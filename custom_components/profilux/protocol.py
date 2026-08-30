@@ -950,14 +950,16 @@ def fetch_all(
     read_names: bool = True,
     port: int = 10002,
     control: bool = False,
-    name_cache: dict[str, str | None] | None = None,
+    name_cache: dict[str, Any] | None = None,
     refresh_names: bool = True,
+    sensor_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Read device info, every populated sensor, and every socket.
 
     ``control`` (API mode only) also reads editable setpoints, which cost an
     extra request per source. ``name_cache``/``refresh_names`` (API mode) let the
-    caller reuse names across polls (see :class:`~.api.ApiController`).
+    caller reuse names across polls; ``sensor_overrides`` pins sensor types (see
+    :class:`~.api.ApiController`).
 
     Raises :class:`ProfiluxError` on connection/auth failure.
     """
@@ -972,6 +974,7 @@ def fetch_all(
                 read_names=read_names,
                 name_cache=name_cache,
                 refresh_names=refresh_names,
+                sensor_overrides=sensor_overrides,
             ).snapshot(with_control=control)
     with make_transport(interface, host, username, password) as transport:
         return Controller(transport, read_names=read_names).snapshot()
