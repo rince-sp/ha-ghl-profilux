@@ -5,6 +5,18 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-08-30
+
+### Fixed
+- **Dashboard: orphaned sockets no longer render as "unavailable" tiles.** The
+  strategy dashboard is generated from the entity registry, so a socket left
+  behind by an earlier configuration (e.g. an interface switch, or a channel the
+  controller no longer reports) was drawn as a permanent *unavailable* tile — a
+  whole grid of them in the worst case. Sockets without a live state are now
+  skipped, the same way sensor gauges already are. (v2.2.2 already dropped
+  registry-only orphans; this also covers one that keeps its `device_class`
+  while reporting `unavailable`.)
+
 ## [2.2.2] - 2026-08-30
 
 ### Fixed
@@ -338,6 +350,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.2.3]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.3
 [2.2.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.2
 [2.2.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.1
 [2.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.0

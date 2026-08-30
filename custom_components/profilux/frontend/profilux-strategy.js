@@ -69,8 +69,16 @@ class ProfiluxDashboardStrategy {
     const status = ids.filter((id) => isSensor(id) && id.endsWith("_status"));
 
     // Sockets: power-class binary sensors (read-only status). Their controllable
-    // switches are matched in by name further down.
-    const socketSensors = ids.filter((id) => isBinary(id) && deviceClass(id) === "power");
+    // switches are matched in by name further down. Skip any that are currently
+    // "unavailable" — an orphan left behind by an earlier config keeps its
+    // device_class but reports no live state, and rendering it as a broken
+    // "unavailable" tile is exactly the clutter the strategy avoids for gauges.
+    const socketSensors = ids.filter(
+      (id) =>
+        isBinary(id) &&
+        deviceClass(id) === "power" &&
+        stateOf(id).state !== "unavailable"
+    );
 
     // Problem-class binary sensors are the alarms and the level entities.
     const problems = ids.filter((id) => isBinary(id) && deviceClass(id) === "problem");
