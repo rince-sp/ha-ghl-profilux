@@ -5,6 +5,17 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.5] - 2026-08-30
+
+### Fixed
+- **Dashboard-strategy JS is now cache-busted per version.** The strategy was
+  loaded from a fixed URL, so after an update a browser or the mobile app kept
+  running the *cached* older copy — which is why fixes like the channel-ordered
+  sockets (v2.2.2) didn't appear even though the integration and entities had
+  updated. The integration version is now appended to the script URL
+  (`…/profilux-strategy.js?v=<version>`), so each update loads the new strategy
+  without a manual cache clear.
+
 ## [2.2.4] - 2026-08-30
 
 ### Changed
@@ -360,6 +371,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.2.5]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.5
 [2.2.4]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.4
 [2.2.3]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.3
 [2.2.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.2
