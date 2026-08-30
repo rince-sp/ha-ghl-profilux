@@ -338,6 +338,8 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.2.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.2
+[2.2.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.1
 [2.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.0
 [2.1.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.2
 [2.1.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.1
