@@ -71,6 +71,18 @@ API_DISABLED_MESSAGE = (
 # flip point — confirmed against a live controller.
 LEVELSENSOR_ACTIVE_IS_WET = True
 
+# Explicit sensor-type overrides → (label, unit, device_class, decimals). Used
+# when the user pins a sensor's type in the options, since the API doesn't expose
+# the type. Keys match const.SENSOR_TYPE_CHOICES (minus "auto").
+SENSOR_TYPE_MAP: dict[str, tuple[str, str | None, str | None, int]] = {
+    "ph": ("pH", "pH", None, 2),
+    "temperature": ("Temperature", "°C", "temperature", 1),
+    "redox": ("Redox", "mV", None, 0),
+    "conductivity": ("Conductivity", "mS/cm", None, 1),
+    "oxygen": ("Oxygen", "mg/L", None, 1),
+    "humidity": ("Humidity", "%", "humidity", 0),
+}
+
 
 def _parse_reply(reply: str) -> tuple[str | None, int | None]:
     """Parse one API reply line.
@@ -259,13 +271,33 @@ class ApiController:
         self,
         client: GhlApiClient,
         read_names: bool = True,
-        name_cache: dict[str, str | None] | None = None,
+        name_cache: dict[str, Any] | None = None,
         refresh_names: bool = True,
+        sensor_overrides: dict[str, str] | None = None,
     ) -> None:
         self._c = client
         self._read_names = read_names
+        # Holds cached names (key = resource) and unit counts (key = "units:…").
         self._name_cache = name_cache if name_cache is not None else {}
         self._refresh_names = refresh_names
+        self._overrides = sensor_overrides or {}
+
+    def _units(self, index: int, resource: str) -> int:
+        """How many units this sensor offers (1/2/3) — identifies temperature (2:
+        °C/°F) and seawater conductivity (3) deterministically. Cached like names,
+        since it never changes."""
+        key = f"units:{resource}"
+        cached = self._name_cache.get(key)
+        if not self._refresh_names and isinstance(cached, int):
+            return cached
+        if self._c.number(f"GET SENSOR[{index}] ACTVALUE[2]") is not None:
+            count = 3
+        elif self._c.number(f"GET SENSOR[{index}] ACTVALUE[1]") is not None:
+            count = 2
+        else:
+            count = 1
+        self._name_cache[key] = count
+        return count
 
     # -- helpers ----------------------------------------------------------
     def _name(self, resource: str) -> str | None:
@@ -291,14 +323,25 @@ class ApiController:
             if value is None:
                 continue
             name = self._name(f"SENSOR[{i}]")
-            label, unit, device_class, decimals = classify_sensor(None, name)
-            # The GHL API doesn't expose the sensor *type*, so a pH probe named by
-            # location (e.g. "Kalkreaktor", "Technikbecken") isn't recognised by
-            # name — and the API returns pH a decimal place too high. An
-            # otherwise-unidentified sensor whose value sits in the pH×10 band is
-            # almost certainly such a pH probe, so treat it as pH.
-            if unit is None and _looks_like_scaled_ph(value):
-                label, unit, device_class, decimals = "pH", "pH", None, 2
+            override = self._overrides.get(name or "")
+            if override in SENSOR_TYPE_MAP:
+                # User pinned the type explicitly (the reliable path).
+                label, unit, device_class, decimals = SENSOR_TYPE_MAP[override]
+            else:
+                label, unit, device_class, decimals = classify_sensor(None, name)
+                # The GHL API doesn't expose the sensor type, so for a sensor the
+                # name didn't identify: probe the unit count (temperature = 2
+                # units, seawater conductivity = 3), then fall back to the pH×10
+                # value heuristic (pH probes are often named by location, and the
+                # API returns pH a decimal place too high).
+                if unit is None:
+                    units = self._units(i, f"SENSOR[{i}]")
+                    if units == 2:
+                        label, unit, device_class, decimals = SENSOR_TYPE_MAP["temperature"]
+                    elif units == 3:
+                        label, unit, device_class, decimals = SENSOR_TYPE_MAP["conductivity"]
+                    elif _looks_like_scaled_ph(value):
+                        label, unit, device_class, decimals = SENSOR_TYPE_MAP["ph"]
             value = _fix_ph_scale(label, value)
             out.append(
                 {

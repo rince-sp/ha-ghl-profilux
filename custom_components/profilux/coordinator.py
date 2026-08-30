@@ -16,6 +16,7 @@ from .const import (
     CONF_API_CONTROL,
     CONF_INTERFACE,
     CONF_PORT,
+    CONF_SENSOR_TYPES,
     DEFAULT_API_CONTROL,
     DEFAULT_API_PORT,
     DOMAIN,
@@ -57,13 +58,14 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._interface = entry.data.get(CONF_INTERFACE, INTERFACE_HTTP)
         self._port = entry.data.get(CONF_PORT, DEFAULT_API_PORT)
         self._api_control = entry.options.get(CONF_API_CONTROL, DEFAULT_API_CONTROL)
+        self._sensor_overrides = dict(entry.options.get(CONF_SENSOR_TYPES, {}))
         # Remembered "automatic" Function per socket, so control can be handed
         # back to the controller after a manual on/off override.
         self._auto_functions: dict[int, int] = {}
         # GHL API name cache: names rarely change, so read them fully only every
         # NAME_REFRESH_EVERY polls (and for any newly-appeared resource); values
         # are always read, so new hardware still shows up on the next poll.
-        self._name_cache: dict[str, str | None] = {}
+        self._name_cache: dict[str, Any] = {}
         self._poll = 0
 
     @property
@@ -91,6 +93,7 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._api_control,
                 self._name_cache,
                 refresh_names,
+                self._sensor_overrides,
             )
         except ProfiluxError as err:
             raise UpdateFailed(str(err)) from err

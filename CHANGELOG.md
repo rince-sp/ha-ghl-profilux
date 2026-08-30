@@ -5,6 +5,20 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-08-30
+
+### Added
+- **Per-sensor type override (GHL API mode).** The API doesn't report a sensor's
+  type, so under *Configure* each sensor now has a dropdown — **auto / pH /
+  temperature / redox / conductivity / oxygen / humidity**. "auto" keeps the
+  automatic detection; any other choice pins the type (unit, decimals and pH
+  scaling) explicitly, so an oddly-named probe is always right.
+- **Unit-count probe.** For a sensor the name doesn't identify, the integration
+  now probes how many units it offers and identifies **temperature** (2 units:
+  °C/°F) and **seawater conductivity** (3 units) deterministically — so a probe
+  named by location (e.g. "Wärmetauscher") is classified correctly without a name
+  match. The result is cached like names.
+
 ## [2.1.2] - 2026-08-30
 
 ### Fixed
@@ -283,6 +297,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.2.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.2.0
 [2.1.2]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.2
 [2.1.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.1
 [2.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.0
