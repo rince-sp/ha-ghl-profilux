@@ -39,12 +39,21 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     try:
         from homeassistant.components.frontend import add_extra_js_url
         from homeassistant.components.http import StaticPathConfig
+        from homeassistant.loader import async_get_integration
 
         js_path = os.path.join(os.path.dirname(__file__), "frontend", "profilux-strategy.js")
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STRATEGY_URL, js_path, False)]
         )
-        add_extra_js_url(hass, STRATEGY_URL)
+        # Append the integration version as a cache-busting query string, so a
+        # browser/app that cached an older strategy loads the new one after an
+        # update (the static handler ignores the query; the browser doesn't).
+        try:
+            version = (await async_get_integration(hass, DOMAIN)).version
+        except Exception:  # noqa: BLE001 - version is best-effort; fall back to no bust
+            version = None
+        url = f"{STRATEGY_URL}?v={version}" if version else STRATEGY_URL
+        add_extra_js_url(hass, url)
         hass.data[f"{DOMAIN}_frontend_registered"] = True
     except Exception as err:  # noqa: BLE001 - never fail setup over the optional dashboard
         _LOGGER.warning("Could not register ProfiLux dashboard strategy: %s", err)
