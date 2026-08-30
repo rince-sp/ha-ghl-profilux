@@ -292,6 +292,7 @@ class ApiController:
                 continue
             name = self._name(f"SENSOR[{i}]")
             label, unit, device_class, decimals = classify_sensor(None, name)
+            value = _fix_ph_scale(label, value)
             out.append(
                 {
                     "index": i,
@@ -442,6 +443,7 @@ class ApiController:
             value = self._c.number(f"GET {resource} DESVALUE")
             if value is None:
                 continue
+            value = _fix_ph_scale(s.get("label"), value)
             lo, hi, step = _SETPOINT_RANGES.get(s.get("unit"), (0.0, 1000.0, 0.1))
             out.append(
                 {
@@ -478,6 +480,17 @@ class ApiController:
             "setpoints": self.setpoints(sensors) if with_control else [],
             "master_brightness": self.master_brightness(),
         }
+
+
+def _fix_ph_scale(label: str | None, value: float | None) -> float | None:
+    """Correct a pH the GHL API returns shifted by a decimal place (e.g. 83.7 for
+    8.37). pH is physically 0..14, so divide an out-of-range pH back into range.
+    Only touches pH, and only when clearly a power-of-ten too large."""
+    if value is None or label != "pH":
+        return value
+    while value > 14:
+        value /= 10
+    return value
 
 
 def _extra_sensor(

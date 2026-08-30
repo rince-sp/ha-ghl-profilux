@@ -5,6 +5,15 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-08-28
+
+### Fixed
+- **GHL API: pH read a decimal place too high** (e.g. 83.7 instead of 8.37). The
+  API returns pH shifted by a power of ten on some firmware; since pH is
+  physically 0–14, an out-of-range pH is now divided back into range. Applies to
+  both the pH sensor and its setpoint; other sensors are untouched. (The raw
+  SWMBus interface was already correct.)
+
 ## [2.1.0] - 2026-08-27
 
 ### Added
@@ -262,6 +271,7 @@ Assistant.
 - Standalone `scraper.py` for verifying a controller from the LAN, with a
   `--debug` register dump.
 
+[2.1.1]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.1
 [2.1.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.1.0
 [2.0.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v2.0.0
 [1.9.0]: https://github.com/rince-sp/ha-ghl-profilux/releases/tag/v1.9.0
