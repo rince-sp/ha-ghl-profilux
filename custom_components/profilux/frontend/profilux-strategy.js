@@ -47,6 +47,15 @@ class ProfiluxDashboardStrategy {
     };
 
     const isSensor = (id) => id.startsWith("sensor.");
+    const isBinary = (id) => id.startsWith("binary_sensor.");
+    // Classify by device_class, not by entity-id text: entity ids are derived
+    // from the (localised, user-editable) friendly name, so a name-based filter
+    // mis-sorts renamed entities — e.g. the "Level sensor fault" sensor leaking
+    // into the socket grid. Sockets report device_class "power"; the alarm, the
+    // level fault, level-loop alarms and individual level sensors are "problem".
+    const deviceClass = (id) => stateOf(id)?.attributes.device_class;
+    const friendlyName = (id) => stateOf(id)?.attributes.friendly_name || "";
+
     const gauges = ids.filter(
       (id) =>
         isSensor(id) &&
@@ -58,20 +67,26 @@ class ProfiluxDashboardStrategy {
     const totalPower = ids.find((id) => id.endsWith("_total_power"));
     const totalCurrent = ids.find((id) => id.endsWith("_total_current"));
     const status = ids.filter((id) => isSensor(id) && id.endsWith("_status"));
-    const alarms = ids.filter(
-      (id) => id.startsWith("binary_sensor.") && id.endsWith("_alarm")
+
+    // Sockets: power-class binary sensors (read-only status). Their controllable
+    // switches are matched in by name further down.
+    const socketSensors = ids.filter((id) => isBinary(id) && deviceClass(id) === "power");
+
+    // Problem-class binary sensors are the alarms and the level entities.
+    const problems = ids.filter((id) => isBinary(id) && deviceClass(id) === "problem");
+    const alarms = problems.filter((id) => id.endsWith("_alarm"));
+    // The controller-wide level fault: "…fault" / "…Fehler" in its id or name.
+    const levelFault = problems.find(
+      (id) => /fault/i.test(id) || /fault|fehler/i.test(friendlyName(id))
     );
-    const levelFault = ids.find((id) => id.endsWith("_level_fault"));
-    // Individual level sensors (GHL API mode).
-    const levelSensors = ids.filter(
-      (id) => id.startsWith("binary_sensor.") && /_level_sensor_\d+$/.test(id)
-    );
-    const socketSensors = ids.filter(
+    // Individual level sensors: whatever problem-class binary sensors remain
+    // once the alarms, the level fault and the min/max float switches are taken
+    // out — this catches both numbered ("Level sensor 3") and location-named
+    // ("Technikbecken") sensors, which an id-pattern filter used to miss.
+    const levelSensors = problems.filter(
       (id) =>
-        id.startsWith("binary_sensor.") &&
+        id !== levelFault &&
         !id.endsWith("_alarm") &&
-        !id.endsWith("_level_fault") &&
-        !/_level_sensor_\d+$/.test(id) &&
         !/_(min|max)_float$/.test(id)
     );
 
@@ -88,10 +103,18 @@ class ProfiluxDashboardStrategy {
 
     // Prefer the controllable switch (tap-to-toggle) over the read-only status
     // sensor when a switch exists for the same socket.
-    const sockets = socketSensors.map((bs) => {
-      const name = socketName(bs);
-      return switches.find((s) => socketName(s) === name) || bs;
-    });
+    const sockets = socketSensors
+      .map((bs) => {
+        const name = socketName(bs);
+        return switches.find((s) => socketName(s) === name) || bs;
+      })
+      // Order by the hardware channel number (exposed as a "channel" attribute),
+      // so the sockets read 1, 2, 3 … instead of alphabetically by name.
+      .sort((a, b) => {
+        const ca = stateOf(a)?.attributes.channel ?? Number.MAX_SAFE_INTEGER;
+        const cb = stateOf(b)?.attributes.channel ?? Number.MAX_SAFE_INTEGER;
+        return ca - cb;
+      });
 
     // GHL API control entities: setpoints (numbers), lighting (lights), and the
     // aquarium actions — switches/selects/buttons that aren't tied to a socket.
