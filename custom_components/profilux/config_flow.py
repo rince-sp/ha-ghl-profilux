@@ -21,7 +21,6 @@ from .const import (
     SENSOR_TYPE_CHOICES,
 )
 from .protocol import (
-    INTERFACE_API,
     INTERFACE_HTTP,
     INTERFACES,
     ProfiluxError,
@@ -89,9 +88,13 @@ class ProfiluxOptionsFlow(config_entries.OptionsFlow):
     """
 
     def _sensor_names(self) -> list[str]:
-        """Named sensors from the last poll (only meaningful in GHL API mode)."""
-        if self.config_entry.data.get(CONF_INTERFACE) != INTERFACE_API:
-            return []
+        """Named sensors from the last poll, on any interface.
+
+        A type override helps whenever classification is uncertain: the GHL API
+        never reports a sensor's type, and on SWMBus some firmwares report an
+        unreliable type register (a pH probe named by location then reads a
+        power of ten too high). So the dropdowns are offered for every interface.
+        """
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         data = getattr(coordinator, "data", None) or {}
         return [s["name"] for s in data.get("sensors", []) if s.get("name")]

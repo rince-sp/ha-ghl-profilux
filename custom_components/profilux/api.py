@@ -30,7 +30,12 @@ from typing import Any
 # Imported lazily-safe: protocol.py imports api.py only inside functions, so this
 # top-level import back into protocol is fine (api is imported after protocol's
 # module body has run).
-from .protocol import ProfiluxError, classify_sensor
+from .protocol import (
+    SENSOR_TYPE_MAP,
+    ProfiluxError,
+    _looks_like_scaled_ph,
+    classify_sensor,
+)
 
 DEFAULT_API_PORT = 10002
 
@@ -70,18 +75,6 @@ API_DISABLED_MESSAGE = (
 # The doc doesn't pin the polarity down, so it lives here as a single, obvious
 # flip point — confirmed against a live controller.
 LEVELSENSOR_ACTIVE_IS_WET = True
-
-# Explicit sensor-type overrides → (label, unit, device_class, decimals). Used
-# when the user pins a sensor's type in the options, since the API doesn't expose
-# the type. Keys match const.SENSOR_TYPE_CHOICES (minus "auto").
-SENSOR_TYPE_MAP: dict[str, tuple[str, str | None, str | None, int]] = {
-    "ph": ("pH", "pH", None, 2),
-    "temperature": ("Temperature", "°C", "temperature", 1),
-    "redox": ("Redox", "mV", None, 0),
-    "conductivity": ("Conductivity", "mS/cm", None, 1),
-    "oxygen": ("Oxygen", "mg/L", None, 1),
-    "humidity": ("Humidity", "%", "humidity", 0),
-}
 
 
 def _parse_reply(reply: str) -> tuple[str | None, int | None]:
@@ -330,18 +323,26 @@ class ApiController:
             else:
                 label, unit, device_class, decimals = classify_sensor(None, name)
                 # The GHL API doesn't expose the sensor type, so for a sensor the
-                # name didn't identify: probe the unit count (temperature = 2
-                # units, seawater conductivity = 3), then fall back to the pH×10
-                # value heuristic (pH probes are often named by location, and the
-                # API returns pH a decimal place too high).
+                # name didn't identify, detect it in two steps:
+                #
+                # 1. The pH×10 value heuristic FIRST. pH probes are often named by
+                #    location (e.g. "Kalkreaktor") and the API returns pH a decimal
+                #    place too high, so a raw value of ≈50–100 is a scaled pH — no
+                #    aquarium temperature (°C) or seawater conductivity (mS/cm)
+                #    lands in that band. Checking this before the unit probe means
+                #    a pH sensor whose firmware happens to answer ACTVALUE[1]/[2]
+                #    can't be mis-detected as temperature/conductivity.
+                # 2. Otherwise probe the unit count (temperature = 2 units,
+                #    seawater conductivity = 3).
                 if unit is None:
-                    units = self._units(i, f"SENSOR[{i}]")
-                    if units == 2:
-                        label, unit, device_class, decimals = SENSOR_TYPE_MAP["temperature"]
-                    elif units == 3:
-                        label, unit, device_class, decimals = SENSOR_TYPE_MAP["conductivity"]
-                    elif _looks_like_scaled_ph(value):
+                    if _looks_like_scaled_ph(value):
                         label, unit, device_class, decimals = SENSOR_TYPE_MAP["ph"]
+                    else:
+                        units = self._units(i, f"SENSOR[{i}]")
+                        if units == 2:
+                            label, unit, device_class, decimals = SENSOR_TYPE_MAP["temperature"]
+                        elif units == 3:
+                            label, unit, device_class, decimals = SENSOR_TYPE_MAP["conductivity"]
             value = _fix_ph_scale(label, value)
             out.append(
                 {
@@ -530,13 +531,6 @@ class ApiController:
             "setpoints": self.setpoints(sensors) if with_control else [],
             "master_brightness": self.master_brightness(),
         }
-
-
-def _looks_like_scaled_ph(value: float | None) -> bool:
-    """True if an unidentified sensor value looks like a pH returned ×10 by the
-    GHL API. The band (≈ pH 5.0–10.0 before the /10) covers realistic aquarium
-    and calcium-reactor pH while excluding ION values, conductivity, etc."""
-    return value is not None and 50 <= value <= 100
 
 
 def _fix_ph_scale(label: str | None, value: float | None) -> float | None:

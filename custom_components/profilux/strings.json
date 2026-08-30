@@ -23,7 +23,7 @@
     "step": {
       "init": {
         "title": "ProfiLux options",
-        "description": "These options add entities that write to the controller. Socket control (SWMBus interfaces) can override the automatic control of live equipment. GHL API control adds editable setpoints, feed pause / water change / maintenance and lighting — it needs the API set to full access on the controller. In GHL API mode, each sensor below can be pinned to a type (the API doesn't report it); leave it on \"auto\" to detect it from the name and a unit probe. Leave off what you don't need.",
+        "description": "These options add entities that write to the controller. Socket control (SWMBus interfaces) can override the automatic control of live equipment. GHL API control adds editable setpoints, feed pause / water change / maintenance and lighting — it needs the API set to full access on the controller. Each sensor below can be pinned to a type — the GHL API never reports it, and some SWMBus firmwares report an unreliable type register; leave it on \"auto\" to detect the type from the name, a unit probe and a value check. Leave off what you don't need.",
         "data": {
           "control_sockets": "Enable socket control (on/off switch per socket — SWMBus only)",
           "api_control": "Enable GHL API control (setpoints, actions, lighting — needs full access)"
