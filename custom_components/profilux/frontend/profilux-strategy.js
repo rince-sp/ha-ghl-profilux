@@ -110,11 +110,20 @@ class ProfiluxDashboardStrategy {
     const switches = ids.filter((id) => id.startsWith("switch."));
 
     // Prefer the controllable switch (tap-to-toggle) over the read-only status
-    // sensor when a switch exists for the same socket.
+    // sensor when a *live* switch exists for the same socket. The switch must be
+    // available: switching interface (SWMBus <-> GHL API) leaves the other mode's
+    // switches behind as unavailable orphans, and one of those must never hijack
+    // the tile from the live status sensor.
     const sockets = socketSensors
       .map((bs) => {
         const name = socketName(bs);
-        return switches.find((s) => socketName(s) === name) || bs;
+        const sw = switches.find(
+          (s) =>
+            socketName(s) === name &&
+            stateOf(s) &&
+            stateOf(s).state !== "unavailable"
+        );
+        return sw || bs;
       })
       // Order by the hardware channel number (exposed as a "channel" attribute),
       // so the sockets read 1, 2, 3 … instead of alphabetically by name.
