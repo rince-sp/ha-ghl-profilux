@@ -59,6 +59,11 @@ it reads cleanly and exposes things the raw registers don't, including **each
 level sensor's individual wet/dry state**, the **KH Director**, up to five
 **ION Director** values, and **flow sensors** — all under the names you gave them.
 
+> **KH / ION Director on a SWMBus entry.** If you set the integration up on
+> `websocket` / `http`, it still reads the KH Director and ION Director values
+> over the GHL API WebSocket alongside each poll — just enable the API on the
+> controller. No need to re-add the integration (which would change entity IDs).
+
 - **Enable it first.** The API is **off by default** (and after every firmware
   update). Turn it on under **System → GHL API** in GHL Control Center or GHL
   Connect. **Read access is enough** for this integration.

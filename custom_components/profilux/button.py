@@ -24,7 +24,7 @@ async def async_setup_entry(
 ) -> None:
     """Create action buttons — only with API control enabled."""
     coordinator: ProfiluxCoordinator = hass.data[DOMAIN][entry.entry_id]
-    if not coordinator.supports_api_control:
+    if not coordinator.supports_api_actions:
         return
 
     def _builder(data: dict[str, Any]):

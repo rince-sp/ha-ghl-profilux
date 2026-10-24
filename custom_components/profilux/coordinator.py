@@ -29,6 +29,7 @@ from .protocol import (
     SOCKET_FUNCTION_ALWAYS_ON,
     Controller,
     ProfiluxError,
+    api_director_sensors,
     api_set,
     fetch_all,
     make_transport,
@@ -39,6 +40,11 @@ _LOGGER = logging.getLogger(__name__)
 # Re-read all GHL API names every N polls (names change rarely; this cuts most
 # of the per-poll traffic while still catching renames within a few minutes).
 NAME_REFRESH_EVERY = 20
+
+# SWMBus entries read the KH / ION Director over the GHL API. If that has never
+# answered (API disabled on the controller, or no Director), retry only every N
+# polls so a SWMBus-only setup doesn't pay a failed connection on each poll.
+DIRECTOR_RETRY_EVERY = 20
 
 
 class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -67,11 +73,21 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # are always read, so new hardware still shows up on the next poll.
         self._name_cache: dict[str, Any] = {}
         self._poll = 0
+        # Whether the GHL API has ever returned Director values (SWMBus mode).
+        self._directors_seen = False
 
     @property
     def supports_socket_control(self) -> bool:
         """Socket on/off is a raw-SWMBus feature; the GHL API can't switch."""
         return self._interface != INTERFACE_API
+
+    @property
+    def supports_api_actions(self) -> bool:
+        """One-shot GHL API actions (measure buttons) — opt-in, any interface.
+
+        They go over the API's own WebSocket, so they also work for a SWMBus
+        entry whose controller has the API enabled (full access)."""
+        return self._api_control
 
     @property
     def supports_api_control(self) -> bool:
@@ -97,12 +113,35 @@ class ProfiluxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except ProfiluxError as err:
             raise UpdateFailed(str(err)) from err
+        if self._interface != INTERFACE_API:
+            directors = await self._async_director_sensors()
+            data.setdefault("sensors", []).extend(directors)
         # Snapshot each socket's automatic Function while it isn't overridden, so
         # we can restore it later.
         for socket in data.get("sockets", []):
             if socket.get("mode") == "auto" and socket.get("function") is not None:
                 self._auto_functions[socket["index"]] = socket["function"]
         return data
+
+    async def _async_director_sensors(self) -> list[dict[str, Any]]:
+        """KH / ION Director values for a SWMBus entry, via the GHL API.
+
+        The SWMBus registers don't carry them, so a SWMBus entry would otherwise
+        never see a Director. Best effort: a failure only leaves those sensors
+        unavailable, it never fails the poll.
+        """
+        if not self._directors_seen and (self._poll - 1) % DIRECTOR_RETRY_EVERY:
+            return []
+        try:
+            sensors = await self.hass.async_add_executor_job(
+                api_director_sensors, self._host
+            )
+        except ProfiluxError as err:
+            _LOGGER.debug("KH/ION Director not read over the GHL API: %s", err)
+            return []
+        if sensors:
+            self._directors_seen = True
+        return sensors
 
     def auto_function(self, index: int) -> int | None:
         """The remembered automatic Function for a socket, if seen un-overridden."""

@@ -1031,6 +1031,13 @@ def api_set(host: str, command: str) -> bool:
     return api_command(host, command)
 
 
+def api_director_sensors(host: str) -> list[dict[str, Any]]:
+    """KH / ION Director readings via the GHL API (any interface; see api.py)."""
+    from .api import fetch_director_sensors
+
+    return fetch_director_sensors(host)
+
+
 def test_connection(
     host: str,
     username: str,
