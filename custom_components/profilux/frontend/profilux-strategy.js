@@ -29,6 +29,7 @@ const RANGES = {
   "\u00b5S/cm": { min: 0, max: 2000 },
   "%": { min: 0, max: 100 },
   "mg/L": { min: 0, max: 20 },
+  "\u00b0dH": { min: 0, max: 15 },
 };
 
 class ProfiluxDashboardStrategy {

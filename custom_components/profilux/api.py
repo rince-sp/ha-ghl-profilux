@@ -356,15 +356,7 @@ class ApiController:
                     "device_class": device_class,
                 }
             )
-        # KH Director (single, no index).
-        kh = self._c.number("GET KHDIRECTOR ACTVALUE")
-        if kh is not None:
-            out.append(_extra_sensor("kh", "KH Director", kh, "°dH", 1))
-        # ION Director — up to five measured values.
-        for i in range(API_MAX_IONVALUES):
-            v = self._c.number(f"GET IONDIRECTOR[{i}] ACTVALUE")
-            if v is not None:
-                out.append(_extra_sensor(f"ion{i}", f"ION Director {i + 1}", v, None, 2))
+        out.extend(self.director_sensors())
         # Flow sensors.
         for i in range(API_MAX_FLOWSENSORS):
             v = self._c.number(f"GET FLOWSENSOR[{i}] ACTFLOW")
@@ -402,6 +394,20 @@ class ApiController:
                     "device_class": None,
                 }
             )
+        return out
+
+    def director_sensors(self) -> list[dict[str, Any]]:
+        """KH Director and ION Director values — only the GHL API exposes them."""
+        out: list[dict[str, Any]] = []
+        # KH Director (single, no index).
+        kh = self._c.number("GET KHDIRECTOR ACTVALUE")
+        if kh is not None:
+            out.append(_extra_sensor("kh", "KH Director", kh, "°dH", 1))
+        # ION Director — up to five measured values.
+        for i in range(API_MAX_IONVALUES):
+            v = self._c.number(f"GET IONDIRECTOR[{i}] ACTVALUE")
+            if v is not None:
+                out.append(_extra_sensor(f"ion{i}", f"ION Director {i + 1}", v, None, 2))
         return out
 
     def master_brightness(self) -> float | None:
@@ -557,6 +563,18 @@ def _extra_sensor(
         "unit": unit,
         "device_class": None,
     }
+
+
+def fetch_director_sensors(host: str) -> list[dict[str, Any]]:
+    """KH / ION Director values over the GHL API WebSocket.
+
+    For entries on a SWMBus interface: the raw registers don't carry the
+    Directors, but the controller serves the GHL API alongside, so these are
+    read from there and merged into the SWMBus snapshot. Raises
+    :class:`ProfiluxError` if the API is unreachable or disabled.
+    """
+    with GhlApiWsClient(host) as client:
+        return ApiController(client, read_names=False).director_sensors()
 
 
 def api_command(host: str, command: str) -> bool:

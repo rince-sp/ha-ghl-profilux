@@ -5,6 +5,22 @@ All notable changes to this integration are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-10-24
+
+### Added
+- **KH Director (and ION Director) on the SWMBus interfaces.** The raw SWMBus
+  registers don't carry the Directors, so an entry set up on HTTP / WebSocket
+  never got a KH sensor — only GHL API entries did. SWMBus entries now also read
+  `KHDIRECTOR ACTVALUE` (and the ION Director values) over the controller's GHL
+  API WebSocket each poll and add them as sensors (`KH Director`, °dH). Existing
+  entities and their IDs are untouched, so there's no need to re-add the
+  integration on the GHL API interface. Needs the GHL API enabled on the
+  controller (read access is enough); if it never answers, the integration
+  quietly retries every 20 polls and the rest of the poll is unaffected.
+- **KH / ION Director "measure" buttons on SWMBus too**, when *GHL API control*
+  is enabled (needs full API access).
+- **Dashboard:** a gauge range for °dH (0–15).
+
 ## [2.2.7] - 2026-08-30
 
 ### Fixed
