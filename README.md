@@ -155,6 +155,20 @@ Home Assistant config flow.
 > old integration and its `custom_components/profilux_mini/` folder to avoid two
 > integrations polling the same controller.
 
+## Sending your values to ReefGuide
+
+Want your ProfiLux probe values (and the measured power) in
+[ReefGuide](https://www.reefguide.app)? Home Assistant is the bridge: ReefGuide
+generates a ready-made Home Assistant package that pushes the values every 1–24
+hours. A step-by-step guide for beginners (in German) walks through the whole
+setup, from this integration to the first values in ReefGuide:
+
+📘 **[GHL ProfiLux mit ReefGuide verbinden – über Home Assistant](docs/anleitung-ghl-profilux-home-assistant.md)**
+
+> This integration is only one way to get the values into Home Assistant —
+> ReefGuide accepts any numeric Home Assistant entity, so every ProfiLux model
+> and module works, however its values reach Home Assistant.
+
 ## Dashboard
 
 ### Auto-generating strategy (recommended)
